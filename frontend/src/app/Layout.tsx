@@ -1,6 +1,7 @@
 import { Link, Outlet } from 'react-router';
 import { t } from '../i18n/t';
 import styles from './Layout.module.css';
+import { SearchBox } from './SearchBox';
 
 /** Page shell: header (logo, search box slot, cart counter slot) and the routed content. */
 export function Layout() {
@@ -14,7 +15,9 @@ export function Layout() {
           <Link to="/" className={styles.logo} aria-label={t('header.home')}>
             {t('app.name')}
           </Link>
-          <div className={styles.search} data-slot="search" />
+          <div className={styles.search}>
+            <SearchBox />
+          </div>
           <div className={styles.cart} data-slot="cart" />
         </div>
       </header>

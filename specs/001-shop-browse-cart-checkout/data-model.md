@@ -50,7 +50,7 @@ Flat list, no subcategories (spec assumption).
 | Field | Domain type | Column | Rules |
 |---|---|---|---|
 | id | `ProductId(long)` | `id BIGINT IDENTITY` PK | |
-| name | `String` | `name NVARCHAR(200) COLLATE Polish_100_CI_AI` | NOT NULL; collation for FR-003 (R-05) |
+| name | `String` | `name NVARCHAR(200) COLLATE Latin1_General_100_CI_AI` | NOT NULL; collation for FR-003 (R-05) |
 | description | `String` | `description NVARCHAR(4000)` | |
 | price | `Money` | `price_minor BIGINT` | NOT NULL, `> 0` (CHECK) |
 | categoryId | `CategoryId` | `category_id BIGINT` FK → `category` | NOT NULL (FK within the BC) |

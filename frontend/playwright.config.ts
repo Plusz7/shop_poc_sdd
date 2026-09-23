@@ -1,6 +1,12 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
+ * Locally the installed Microsoft Edge is used, so no browser download is needed; CI (Linux runner,
+ * no Edge) uses the Chromium bundled with Playwright. Override with PW_CHANNEL (e.g. "chrome").
+ */
+const browserChannel = process.env.PW_CHANNEL ?? (process.env.CI ? undefined : 'msedge');
+
+/**
  * E2E of the P1 paths against the running stack (quickstart.md section 2): frontend on :5173,
  * backend with the local/e2e profile on :8080, SQL Server from compose.yaml.
  */
@@ -16,8 +22,17 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   projects: [
-    { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
-    { name: 'mobile-360', use: { ...devices['Desktop Chrome'], viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true } },
+    { name: 'desktop', use: { ...devices['Desktop Chrome'], channel: browserChannel } },
+    {
+      name: 'mobile-360',
+      use: {
+        ...devices['Desktop Chrome'],
+        channel: browserChannel,
+        viewport: { width: 360, height: 780 },
+        isMobile: true,
+        hasTouch: true,
+      },
+    },
   ],
   webServer: {
     command: 'npm run dev',
