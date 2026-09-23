@@ -1,0 +1,73 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.skipLink {
+  position: absolute;
+  left: -9999px;
+}
+
+.skipLink:focus {
+  left: 16px;
+  top: 8px;
+  z-index: 200;
+  padding: 8px 12px;
+  background: #fff;
+  color: #111827;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #111827;
+  color: #fff;
+}
+
+.headerInner {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: 'logo search cart';
+  align-items: center;
+  gap: 12px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 12px 16px;
+}
+
+.logo {
+  grid-area: logo;
+  color: #fff;
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.search {
+  grid-area: search;
+  min-width: 0;
+}
+
+.cart {
+  grid-area: cart;
+}
+
+.main {
+  flex: 1;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+/* 360 px phones: search goes to its own row under the logo and the cart link */
+@media (max-width: 599px) {
+  .headerInner {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      'logo cart'
+      'search search';
+  }
+}

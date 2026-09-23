@@ -1,0 +1,5 @@
+# Test fixtures flagged by the generic-api-key rule; neither belongs to any Stripe account.
+# Stripe webhook signing secret used only by the integration tests (StripeWebhookSigner)
+af298a24651d0c763d70a932f2ed0528fd16d130:backend/src/test/resources/application-test.yaml:generic-api-key:10
+# Malformed webhook secret (no whsec_ prefix) asserting that startup is rejected
+c9d98678da8a9ffe318d16013d7f449b5caf722a:backend/src/test/java/com/project/custom/payment/infrastructure/stripe/StripePropertiesValidationTest.java:generic-api-key:18

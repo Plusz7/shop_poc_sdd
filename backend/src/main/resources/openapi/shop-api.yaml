@@ -1,0 +1,563 @@
+openapi: 3.1.0
+info:
+  title: Shop PoC API
+  version: 0.1.0
+  description: |
+    REST contract between the frontend (SPA) and the backend for the
+    `001-shop-browse-cart-checkout` feature. Source of truth (API-first, research R-19).
+
+    Conventions:
+    - All amounts are integers in grosze, i.e. minor units (`*Minor`), currency PLN (R-07).
+    - The cart and orders are tied to the guest through the `shop_guest` cookie
+      (HttpOnly, SameSite=Lax, 30 days), issued by the backend on the first request
+      to `/api/cart*` or `/api/orders*` (R-08). The frontend neither reads nor sets it.
+    - Errors: RFC 9457 `application/problem+json` with the `Problem` schema.
+    - Prices sent by the client are NEVER used for pricing (FR-010, Principle II).
+    - Every response contains the `X-Request-Id` header (correlation identifier in logs,
+      `components.headers.X-Request-Id`, R-32). The client may send it in the request.
+    - Metrics and health are NOT part of this API — they run on the management port `8081`
+      ([metrics.md](metrics.md), R-26).
+security: []  # no authentication; the guest is identified by the shop_guest cookie (R-08)
+servers:
+  - url: /
+tags:
+  - name: catalog
+  - name: cart
+  - name: order
+  - name: payment
+
+paths:
+  /api/categories:
+    get:
+      tags: [catalog]
+      operationId: listCategories
+      summary: List of categories for navigation (FR-002)
+      responses:
+        '200':
+          description: Categories in display order
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Category' }
+
+  /api/products:
+    get:
+      tags: [catalog]
+      operationId: searchProducts
+      summary: Product list with filters, sorting and pagination (FR-001–FR-004)
+      description: |
+        Parameters map 1:1 to the URL parameters of the list page in the frontend
+        (see `frontend-routes.md`). Returns active products only.
+      parameters:
+        - name: category
+          in: query
+          description: Category slug
+          schema: { type: string, pattern: '^[a-z0-9-]{1,80}$' }
+        - name: q
+          in: query
+          description: |
+            Name fragment; ignores letter case and Polish diacritics (FR-003).
+            Trimmed to 100 characters; special characters allowed.
+          schema: { type: string }
+        - name: minPrice
+          in: query
+          description: Minimum price in grosze
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: maxPrice
+          in: query
+          description: Maximum price in grosze
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [name_asc, price_asc, price_desc]
+            default: name_asc
+        - name: page
+          in: query
+          description: Page number, starting from 0
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 48, default: 24 }
+      responses:
+        '200':
+          description: Page of results (empty list = "no results")
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductSearchResult' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/products/{id}:
+    get:
+      tags: [catalog]
+      operationId: getProduct
+      summary: Product page (FR-005)
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '200':
+          description: Product details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductDetails' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/cart:
+    get:
+      tags: [cart]
+      operationId: getCart
+      summary: The guest's priced cart (FR-010, FR-011, FR-013)
+      description: An empty cart when the guest has none yet. May set the `shop_guest` cookie.
+      responses:
+        '200':
+          description: Cart priced with current catalog prices
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+    delete:
+      tags: [cart]
+      operationId: clearCart
+      summary: Clear the whole cart (FR-009)
+      responses:
+        '200':
+          description: Empty cart
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+
+  /api/cart/lines:
+    post:
+      tags: [cart]
+      operationId: addToCart
+      summary: Add a product (quantities are merged, FR-006–FR-008)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddLineRequest' }
+      responses:
+        '200':
+          description: Cart after the addition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            `QUANTITY_EXCEEDS_LIMIT` (field `maxQuantity` = how many can still be added in total
+            to the line) or `PRODUCT_UNAVAILABLE`. Cart unchanged.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /api/cart/lines/{productId}:
+    parameters:
+      - name: productId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    put:
+      tags: [cart]
+      operationId: changeQuantity
+      summary: Set the line quantity; 0 removes the line (FR-008, FR-009)
+      description: |
+        A quantity larger than available is capped at `min(stock, 99)`; the response then
+        contains the `QUANTITY_CAPPED` message in `messages` (US3-3).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangeQuantityRequest' }
+      responses:
+        '200':
+          description: Cart after the change
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [cart]
+      operationId: removeLine
+      summary: Remove a line (idempotent)
+      responses:
+        '200':
+          description: Cart after the removal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+
+  /api/cart/accept-prices:
+    post:
+      tags: [cart]
+      operationId: acceptPrices
+      summary: Acknowledge price changes (FR-011, R-09)
+      responses:
+        '200':
+          description: Cart without `priceChanged` flags
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+
+  /api/orders:
+    post:
+      tags: [order]
+      operationId: placeOrder
+      summary: Create an order and start the Stripe Checkout payment (FR-014–FR-018)
+      description: |
+        The backend re-prices the cart and compares it with `confirmedSummary` (R-14).
+        If they match, it creates an `AWAITING_PAYMENT` order with immutable lines,
+        creates a Stripe session and returns `paymentUrl`, to which the frontend
+        redirects. The cart is NOT cleared in this step.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlaceOrderRequest' }
+      responses:
+        '201':
+          description: Order created, payment started
+          headers:
+            Location:
+              schema: { type: string }
+              description: /api/orders/{number}
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StartedPayment' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          description: |
+            `SUMMARY_OUTDATED` — price/availability/contents changed; `cart` contains the
+            current summary for re-confirmation (US4-7).
+            `CART_NOT_ORDERABLE` — the cart is empty or has unavailable lines (FR-014).
+            `ORDER_ALREADY_PAID` — the guest's previous session has already been paid (R-13).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemWithCart' }
+        '503':
+          description: '`PAYMENT_UNAVAILABLE` — the provider is temporarily unavailable; cart unchanged.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /api/orders/{number}:
+    get:
+      tags: [order]
+      operationId: getOrder
+      summary: Confirmation page — only for the guest who placed the order (FR-023)
+      description: |
+        Returns `404` when the order does not exist OR belongs to another guest (R-15).
+        The frontend polls every 2 s while status = `AWAITING_PAYMENT` (max. 60 s, US4-6).
+      parameters:
+        - name: number
+          in: path
+          required: true
+          schema: { type: string, pattern: '^ORD-[0-9A-HJKMNP-TV-Z]{10}$' }
+      responses:
+        '200':
+          description: Order
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/payments/stripe/webhook:
+    post:
+      tags: [payment]
+      operationId: stripeWebhook
+      summary: Stripe webhook (FR-019, FR-020) — called by Stripe only
+      description: |
+        Details of handled events: `stripe-webhook.md`. The body is processed as
+        raw text (required for signature verification). No cookie required.
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Stripe `Event` object
+      responses:
+        '200':
+          description: Event processed, ignored or duplicate
+        '400':
+          description: Missing or invalid signature / unreadable body — no effects
+        '500':
+          description: Technical error — Stripe will retry delivery
+
+components:
+  parameters:
+    ProductId:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+
+  headers:
+    X-Request-Id:
+      description: |
+        Request correlation identifier (R-32). Echo of the request value if it matches the
+        pattern, otherwise a UUID generated by the backend. Present in every response.
+      schema: { type: string, pattern: '^[A-Za-z0-9-]{8,64}$' }
+
+  responses:
+    ValidationError:
+      description: Invalid input (`code = VALIDATION_ERROR`, errors per field)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: The resource does not exist or is not available to this guest
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    AvailabilityStatus:
+      type: string
+      enum: [AVAILABLE, LOW_STOCK, UNAVAILABLE]
+
+    Category:
+      type: object
+      required: [slug, name]
+      properties:
+        slug: { type: string }
+        name: { type: string }
+
+    Image:
+      type: object
+      required: [url, alt]
+      properties:
+        url: { type: string, examples: ['/images/headphones-1.jpg'] }
+        alt: { type: string }
+
+    ProductSummary:
+      type: object
+      required: [id, name, priceMinor, status, image, maxAddable]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        priceMinor: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/AvailabilityStatus' }
+        image: { $ref: '#/components/schemas/Image' }
+        maxAddable:
+          type: integer
+          description: '`min(stock, 99)`; 0 for unavailable products — button disabled (US2-4)'
+
+    ProductSearchResult:
+      type: object
+      required: [products, page, size, totalElements, totalPages]
+      properties:
+        products:
+          type: array
+          items: { $ref: '#/components/schemas/ProductSummary' }
+        page: { type: integer }
+        size: { type: integer }
+        totalElements: { type: integer, format: int64 }
+        totalPages: { type: integer }
+
+    ProductDetails:
+      type: object
+      required: [id, name, description, priceMinor, status, images, category, maxAddable]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        description: { type: string }
+        priceMinor: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/AvailabilityStatus' }
+        images:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Image' }
+        category: { $ref: '#/components/schemas/Category' }
+        maxAddable: { type: integer }
+
+    AddLineRequest:
+      type: object
+      required: [productId, quantity]
+      additionalProperties: false
+      properties:
+        productId: { type: integer, format: int64 }
+        quantity: { type: integer, minimum: 1, maximum: 99 }
+
+    ChangeQuantityRequest:
+      type: object
+      required: [quantity]
+      additionalProperties: false
+      properties:
+        quantity: { type: integer, minimum: 0, maximum: 99 }
+
+    CartLine:
+      type: object
+      required: [productId, name, imageUrl, unitPriceMinor, quantity, lineTotalMinor,
+                 status, maxQuantity, priceChanged, quantityExceedsStock]
+      properties:
+        productId: { type: integer, format: int64 }
+        name: { type: string }
+        imageUrl: { type: string }
+        unitPriceMinor:
+          type: integer
+          format: int64
+          description: Current catalog price
+        quantity: { type: integer }
+        lineTotalMinor: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/AvailabilityStatus' }
+        maxQuantity: { type: integer }
+        priceChanged: { type: boolean }
+        previousPriceMinor:
+          type: [integer, 'null']
+          format: int64
+          description: Price at the time of adding, when `priceChanged = true`
+        quantityExceedsStock: { type: boolean }
+
+    Message:
+      type: object
+      required: [code, text]
+      properties:
+        code:
+          type: string
+          enum: [QUANTITY_CAPPED, PRICE_CHANGED, PRODUCT_UNAVAILABLE, QUANTITY_EXCEEDS_STOCK]
+        productId: { type: [integer, 'null'], format: int64 }
+        text: { type: string, description: Customer-facing message to display (Polish UI copy) }
+
+    Cart:
+      type: object
+      required: [lines, itemCount, totalMinor, canPlaceOrder, messages]
+      properties:
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/CartLine' }
+        itemCount:
+          type: integer
+          description: Header counter (FR-013)
+        totalMinor: { type: integer, format: int64 }
+        canPlaceOrder: { type: boolean }
+        messages:
+          type: array
+          items: { $ref: '#/components/schemas/Message' }
+
+    ConfirmedLine:
+      type: object
+      required: [productId, quantity, unitPriceMinor]
+      additionalProperties: false
+      properties:
+        productId: { type: integer, format: int64 }
+        quantity: { type: integer, minimum: 1, maximum: 99 }
+        unitPriceMinor: { type: integer, format: int64 }
+
+    PlaceOrderRequest:
+      type: object
+      required: [email, fullName, streetAndNumber, postalCode, city, confirmedSummary]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        fullName: { type: string, minLength: 2, maxLength: 100 }
+        streetAndNumber: { type: string, minLength: 3, maxLength: 120 }
+        postalCode: { type: string, pattern: '^\d{2}-\d{3}$' }
+        city: { type: string, minLength: 2, maxLength: 60 }
+        confirmedSummary:
+          type: object
+          description: The summary seen by the customer — for comparison only (R-14)
+          required: [lines, totalMinor]
+          additionalProperties: false
+          properties:
+            lines:
+              type: array
+              minItems: 1
+              items: { $ref: '#/components/schemas/ConfirmedLine' }
+            totalMinor: { type: integer, format: int64 }
+
+    StartedPayment:
+      type: object
+      required: [number, paymentUrl]
+      properties:
+        number: { type: string, examples: ['ORD-7K2Q9M4XTB'] }
+        paymentUrl:
+          type: string
+          format: uri
+          description: URL of the hosted Stripe Checkout page
+
+    OrderStatus:
+      type: string
+      enum: [AWAITING_PAYMENT, PAID, PAYMENT_FAILED, NEEDS_REVIEW]
+
+    OrderLine:
+      type: object
+      required: [name, unitPriceMinor, quantity, lineTotalMinor]
+      properties:
+        name: { type: string }
+        unitPriceMinor: { type: integer, format: int64 }
+        quantity: { type: integer }
+        lineTotalMinor: { type: integer, format: int64 }
+
+    Order:
+      type: object
+      required: [number, status, lines, totalMinor, createdAt]
+      properties:
+        number: { type: string }
+        status: { $ref: '#/components/schemas/OrderStatus' }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/OrderLine' }
+        totalMinor: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+        paidAt: { type: [string, 'null'], format: date-time }
+
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field: { type: string, examples: [postalCode] }
+        message:
+          type: string
+          description: Customer-facing message (Polish UI copy)
+          examples: ['Kod pocztowy musi mieć format NN-NNN']
+
+    Problem:
+      type: object
+      description: RFC 9457 Problem Details
+      required: [title, status, code]
+      properties:
+        type: { type: string, format: uri, default: about:blank }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string, description: "Customer-facing message (Polish UI copy), no sensitive data" }
+        code:
+          type: string
+          enum:
+            - VALIDATION_ERROR
+            - NOT_FOUND
+            - QUANTITY_EXCEEDS_LIMIT
+            - PRODUCT_UNAVAILABLE
+            - SUMMARY_OUTDATED
+            - CART_NOT_ORDERABLE
+            - ORDER_ALREADY_PAID
+            - PAYMENT_UNAVAILABLE
+            - CONCURRENCY_CONFLICT
+            - INTERNAL_ERROR
+        maxQuantity: { type: [integer, 'null'] }
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/FieldError' }
+
+    ProblemWithCart:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            cart: { $ref: '#/components/schemas/Cart' }

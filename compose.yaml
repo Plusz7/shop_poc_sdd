@@ -1,0 +1,85 @@
+# Local dependencies of the shop (R-22, R-31).
+#   docker compose up -d                            -> SQL Server (+ "shop" database), Prometheus, Grafana
+#   docker compose --profile stripe up -d stripe-cli -> Stripe webhook forwarding to the local backend
+# Values come from .env (see .env.example). No secret values in this file.
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -Q \"SELECT 1\" -b -o /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # One-off container creating the "shop" database once SQL Server is healthy.
+  sqlserver-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    entrypoint:
+      - /bin/bash
+      - -c
+      - >-
+        /opt/mssql-tools18/bin/sqlcmd -C -S sqlserver -U sa -P "$${MSSQL_SA_PASSWORD}" -b
+        -Q "IF DB_ID('shop') IS NULL CREATE DATABASE shop"
+    restart: "no"
+
+  prometheus:
+    image: prom/prometheus:v3.13.3
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./observability/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:9090:9090"
+
+  grafana:
+    image: grafana/grafana:13.2.2
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+
+  stripe-cli:
+    image: stripe/stripe-cli:v1.51.1
+    profiles: ["stripe"]
+    environment:
+      STRIPE_API_KEY: ${STRIPE_SECRET_KEY:?Set STRIPE_SECRET_KEY in .env}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - listen
+      - --forward-to
+      - http://host.docker.internal:8080/api/payments/stripe/webhook
+      - --events
+      - checkout.session.completed,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed,checkout.session.expired,payment_intent.payment_failed
+
+volumes:
+  sqlserver-data:
+  prometheus-data:
+  grafana-data:
