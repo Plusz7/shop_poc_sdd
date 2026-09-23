@@ -24,6 +24,9 @@
         <stripe-java.version>33.4.2</stripe-java.version>
         <archunit.version>1.5.0</archunit.version>
         <wiremock.version>3.13.2</wiremock.version>
+        <!-- Boot 4.0.8 manages 11.0.24, affected by GHSA-9xv2-5v5q-p794, GHSA-gcx9-497g-6cp6 and
+             GHSA-h3x4-894j-xpx5 (fixed in 11.0.25); drop once the Boot BOM catches up -->
+        <tomcat.version>11.0.26</tomcat.version>
     </properties>
 
     <dependencies>
