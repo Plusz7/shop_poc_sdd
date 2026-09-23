@@ -37,7 +37,7 @@ compatible with Boot 4), ArchUnit, `micrometer-registry-prometheus`; React 19, V
 TanStack Query, React Hook Form + Zod, `openapi-typescript` + `openapi-fetch`;
 local observability: Prometheus and Grafana (containers, versions pinned in `compose.yaml`)
 
-**Storage**: SQL Server 2022 (collation of column `product.name` = `Polish_100_CI_AI`),
+**Storage**: SQL Server 2022 (collation of column `product.name` = `Latin1_General_100_CI_AI`),
 schema via Flyway; static seed images in backend resources
 
 **Testing**: JUnit Jupiter + AssertJ (domain), `@SpringBootTest` + Testcontainers

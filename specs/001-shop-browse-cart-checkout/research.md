@@ -75,15 +75,18 @@ in the plan's Technical Context.
 
 ## R-05. Case- and diacritic-insensitive search (FR-003)
 
-- **Decision**: the `product.name` column with the `Polish_100_CI_AI` collation; the query
+- **Decision**: the `product.name` column with the `Latin1_General_100_CI_AI` collation; the query
   `WHERE name LIKE :pattern ESCAPE '\'` with the pattern `%phrase%`, where the phrase's
   `% _ [ \` characters are escaped, and the phrase is trimmed to 100 characters and `trim()`med
   (edge case about a long phrase). The parameter is always bound (no SQL concatenation).
 - **Rationale**: the CI_AI collation does all the work on the database side (`łódź` = `LODZ`),
   without an extra normalized column. For ~500 to a few thousand rows a full scan with
   `LIKE '%…%'` stays well below 1 s (SC-003).
-- **Alternatives considered**: a `normalized_name` column maintained in code — more code, risk
-  of drift; SQL Server Full-Text Search — requires extra container configuration and does not
+- **Alternatives considered**: `Polish_100_CI_AI` — the original choice, rejected during
+  implementation: it treats `ł`, `ó`, `ź`, `ą`, … as separate letters of the Polish alphabet, not
+  accented variants, so `LODZ` does not match `łódź` (verified on SQL Server 2022; the cost is that
+  sorting by name follows the Latin rather than the Polish alphabet); a `normalized_name` column
+  maintained in code — more code, risk of drift; SQL Server Full-Text Search — requires extra container configuration and does not
   support "word fragments"; Elasticsearch — contradicts Principle VII.
 
 ## R-06. Filtering, sorting, pagination (FR-001, FR-004)
