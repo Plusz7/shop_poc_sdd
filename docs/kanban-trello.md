@@ -1,40 +1,40 @@
-# Kanban projektu w Trello (MCP dla Claude Code)
+# Project Kanban in Trello (MCP for Claude Code)
 
-Tablica Trello służy do śledzenia zadań zespołu. Claude Code zarządza nią przez serwer MCP
-[`@delorenj/mcp-server-trello`](https://github.com/delorenj/mcp-server-trello) skonfigurowany
-w [`.mcp.json`](../.mcp.json). To narzędzie deweloperskie — nie jest częścią aplikacji sklepu.
+The Trello board tracks the team's tasks. Claude Code manages it through the MCP server
+[`@delorenj/mcp-server-trello`](https://github.com/delorenj/mcp-server-trello) configured
+in [`.mcp.json`](../.mcp.json). This is a developer tool — it is not part of the shop application.
 
-## Konfiguracja (jednorazowo)
+## Setup (one-time)
 
-1. Utwórz tablicę Trello z listami: `Backlog`, `To Do`, `In Progress`, `Review`, `Done`.
-2. Wygeneruj klucz API i token: <https://trello.com/power-ups/admin> → nowy Power-Up →
-   „API key" → link „Token". Token daje dostęp do Twojego konta — traktuj go jak hasło.
-3. Ustaw zmienne środowiskowe użytkownika (Claude Code nie czyta pliku `.env` — rozwija
-   `${...}` w `.mcp.json` ze zmiennych procesu):
+1. Create a Trello board with the lists: `Backlog`, `To Do`, `In Progress`, `Review`, `Done`.
+2. Generate an API key and token: <https://trello.com/power-ups/admin> → new Power-Up →
+   "API key" → "Token" link. The token grants access to your account — treat it like a password.
+3. Set user environment variables (Claude Code does not read the `.env` file — it expands
+   `${...}` in `.mcp.json` from the process environment):
 
    ```powershell
-   setx TRELLO_API_KEY "<klucz>"
+   setx TRELLO_API_KEY "<key>"
    setx TRELLO_TOKEN "<token>"
-   setx TRELLO_BOARD_ID "<id-tablicy>"
+   setx TRELLO_BOARD_ID "<board-id>"
    ```
 
-4. Uruchom ponownie aplikację Claude, zatwierdź serwer `trello` przy pierwszym użyciu
-   i sprawdź połączenie poleceniem: „pokaż listy na tablicy Trello".
+4. Restart the Claude app, approve the `trello` server on first use
+   and verify the connection with the prompt: "show the lists on the Trello board".
 
-Wartości sekretów nigdy nie trafiają do repozytorium; `.mcp.json` zawiera tylko odwołania
-do zmiennych. Przy wycieku tokenu unieważnij go w ustawieniach konta Trello i wygeneruj nowy.
+Secret values never go into the repository; `.mcp.json` contains only references
+to the variables. If the token leaks, revoke it in your Trello account settings and generate a new one.
 
-## Konwencje pracy z tablicą
+## Board conventions
 
-- **Karta = zadanie z `tasks.md`**. Tytuł: `T012 [US2] <opis>`; w opisie ścieżka do
-  `specs/<feature>/tasks.md` i pliki, których dotyczy zadanie.
-- **Etykieta = feature** (np. `001-shop-browse-cart-checkout`) oraz priorytet historii (`P1`).
-- **Przepływ**: `Backlog` (po `/speckit-tasks`) → `To Do` (zaplanowane w bieżącej iteracji)
-  → `In Progress` (w trakcie `/speckit-implement`) → `Review` (otwarty PR) → `Done` (zmergowane).
-- Źródłem prawdy o zakresie jest `tasks.md`; Trello odzwierciedla status. Zmiany zakresu
-  wprowadzaj w `tasks.md`, a potem synchronizuj tablicę.
+- **Card = task from `tasks.md`**. Title: `T012 [US2] <description>`; the description holds the path to
+  `specs/<feature>/tasks.md` and the files the task touches.
+- **Label = feature** (e.g. `001-shop-browse-cart-checkout`) plus the story priority (`P1`).
+- **Flow**: `Backlog` (after `/speckit-tasks`) → `To Do` (planned for the current iteration)
+  → `In Progress` (during `/speckit-implement`) → `Review` (PR open) → `Done` (merged).
+- `tasks.md` is the source of truth for scope; Trello mirrors status. Make scope changes
+  in `tasks.md` first, then sync the board.
 
-## Aktualizacja serwera
+## Updating the server
 
-Wersja serwera jest przypięta w `.mcp.json` (`@1.8.1`), żeby nowe wydanie paczki npm nie
-uruchomiło się bez przeglądu. Podbijaj ją świadomie, po sprawdzeniu zmian w repozytorium paczki.
+The server version is pinned in `.mcp.json` (`@1.8.1`) so that a new npm package release does not
+run without review. Bump it deliberately, after checking the changes in the package repository.
