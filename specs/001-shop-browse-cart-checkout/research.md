@@ -224,7 +224,11 @@ in the plan's Technical Context.
   - **Stripe unavailable**: HTTP client timeouts (connect 5 s, read 10 s), 2 retries (safe thanks
     to the idempotency key). The retries are performed by the adapter (`maxNetworkRetries=0` in the
     SDK, backoff 0.5 s / 1 s, only for connection errors, timeouts, `5xx` and `429`), so that they
-    can be counted in the `shop.stripe.retries` metric (FR-028, R-27). After a failure the order →
+    can be counted in the `shop.stripe.retries` metric (FR-028, R-27). The retry count and the
+    backoff delays are constants in `StripeRetryPolicy` that reference
+    `contracts/stripe-webhook.md` §1, not properties: they are part of the integration contract
+    and of the tests (T086, T125), not environment configuration — unlike the timeouts, which
+    stay in `StripeProperties`. After a failure the order →
     `PAYMENT_FAILED`, API `503` with the code `PAYMENT_UNAVAILABLE`, cart untouched.
   - Stripe calls are made **outside** the database transaction (transaction 1: create the order
     and the payment; the Stripe call; transaction 2: save `stripeSessionId`/URL or mark the
