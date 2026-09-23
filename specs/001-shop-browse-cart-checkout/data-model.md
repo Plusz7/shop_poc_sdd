@@ -244,8 +244,17 @@ retry), `OPEN → FAILED` (async_payment_failed). `CONFIRMED` is final.
 | `createSession` | `paymentId`, `orderNumber`, lines (name, price, quantity), email, return URLs | `PaymentSession{providerSessionId, url}` or `GatewayUnavailable` |
 | `expire` | `providerSessionId` | `EXPIRED` / `ALREADY_PAID` |
 
-Webhook signature verification lives in the `infrastructure/stripe` adapter and produces an
-SDK-independent `ProviderConfirmation{eventId, type, sessionId, paymentIntentId, amount, currency, paid}`.
+### Domain port `ProviderEventVerifier` (Principle V)
+
+| Operation | Input | Output |
+|---|---|---|
+| `verify` | raw body (`String`), signature header (`String`) | SDK-independent `ProviderConfirmation{eventId, type, sessionId, paymentIntentId, amount, currency, paid, livemode, providerCreatedAt}`, or the domain exception `InvalidEventSignature` (missing/invalid signature, tolerance exceeded) |
+
+The port is a `public interface` in `payment/domain/`; the Stripe implementation
+`StripeWebhookVerifier` (`Webhook.constructEvent`) lives in `payment/infrastructure/stripe/`.
+`WebhookHandlingService` (application) depends only on the port, so signature verification,
+the `livemode` check and deduplication all happen in one service and every outcome can be
+reported through `PaymentMetrics`. The controller only passes the raw body and the header.
 
 ### Events published by `payment` (public records in the BC's root package)
 
@@ -283,7 +292,7 @@ events. Full catalog of names and labels: [contracts/metrics.md](contracts/metri
 |---|---|---|---|
 | `CartMetrics` | `addedToCart()` | `CartService` after a successful add | after commit |
 | `OrderMetrics` | `orderCreated()`; `summaryMismatch(Set<MismatchKind>)`; `orderCompleted(OrderStatus target, Money total, Duration timeToPayment)` | `PlaceOrderService` (TX1; on `409`), `PaymentEventsListener` (status transition) | after commit (`409` — immediately, no transaction) |
-| `PaymentMetrics` | `webhook(WebhookOutcome)`; `payment(PaymentOutcome)`; `confirmationDelay(Duration)` | `WebhookHandlingService` — all outcomes, including signature/`livemode` rejections returned by `StripeWebhookVerifier` | after commit; rejections — immediately |
+| `PaymentMetrics` | `webhook(WebhookOutcome)`; `payment(PaymentOutcome)`; `confirmationDelay(Duration)` | `WebhookHandlingService` — all outcomes, including signature/`livemode` rejections reported by the `ProviderEventVerifier` port | after commit; rejections — immediately |
 
 Stripe call metrics (`shop.stripe.*`) are recorded directly by the `StripePaymentGateway` adapter
 (`MeterRegistry` in `infrastructure/`), Outbox gauges by `shared/infrastructure/metrics/OutboxMetrics`,

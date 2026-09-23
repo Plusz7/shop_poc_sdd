@@ -240,8 +240,11 @@ relevant alert changes state.
   product page with a chosen quantity or from the list with quantity 1.
 - **FR-007**: System MUST merge a repeated addition of the same product into a single line with the
   summed quantity.
-- **FR-008**: System MUST block adding or setting a quantity that exceeds the available stock or the
-  limit of 99 items per line, stating the maximum possible quantity.
+- **FR-008**: The maximum quantity of a line is the available stock, capped at 99 items. System MUST
+  block an addition that would exceed this maximum, stating the maximum possible quantity
+  (US2, scenario 3); when the customer sets a line's quantity in the cart (a valid value 0–99)
+  above the available stock, System MUST cap it at the maximum and inform the customer (US3,
+  scenario 3). Values outside 0–99 are rejected as invalid input.
 - **FR-009**: Customers MUST be able to change a line's quantity, remove a line and clear the whole
   cart.
 - **FR-010**: System MUST calculate each line total and the cart total on the shop side based on

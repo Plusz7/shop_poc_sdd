@@ -183,7 +183,9 @@ in the plan's Technical Context.
 ## R-12. Stripe webhook: verification, idempotency, amount match (FR-019, FR-020, SC-004/005)
 
 - **Decision**: the endpoint `POST /api/payments/stripe/webhook` accepts the raw body
-  (`@RequestBody String`) and the `Stripe-Signature` header; verification with
+  (`@RequestBody String`) and the `Stripe-Signature` header and passes both to
+  `WebhookHandlingService`, which verifies them through the domain port `ProviderEventVerifier`;
+  its Stripe adapter `StripeWebhookVerifier` calls
   `Webhook.constructEvent(payload, signature, webhookSecret)` (tolerance 300 s). A missing or
   invalid signature → `400`, with no changes at all. Handled types:
 
@@ -320,13 +322,21 @@ in the plan's Technical Context.
 
 ## R-20. Secrets and configuration (Principle I)
 
-- **Decision**: `@ConfigurationProperties("shop.stripe") @Validated record StripeProperties(
-  @NotBlank @Pattern("sk_test_.+") String secretKey, @NotBlank @Pattern("whsec_.+") String webhookSecret,
-  Duration connectTimeout, Duration readTimeout, URI apiBase)` (`apiBase` optional, default
-  `https://api.stripe.com` — overridden in tests with `stripe-mock`/WireMock) — a missing value or
-  an `sk_live_` key blocks startup with a message that contains no values. Values come from the
+- **Decision**: `@ConfigurationProperties("shop.stripe") record StripeProperties(String secretKey,
+  String webhookSecret, Duration connectTimeout, Duration readTimeout, URI apiBase)` (`apiBase`
+  optional, default `https://api.stripe.com` — overridden in tests with `stripe-mock`/WireMock),
+  validated in the compact constructor (`^sk_test_.+`, `^whsec_.+`, positive timeouts) with
+  messages that name only the property, plus a `StripePropertiesFailureAnalyzer` and a masking
+  `toString()` — a missing value or an `sk_live_` key blocks startup with a message that contains
+  no values. `@Validated` + `@Pattern` is rejected: the Bean Validation error and the standard
+  `BindFailureAnalyzer` print the rejected value, i.e. the key. Values come from the
   environment variables `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `DB_PASSWORD`,
-  `APP_BASE_URL`; `application.yaml` contains only `${…}` with no defaults for secrets.
+  `APP_BASE_URL`; `application.yaml` contains only `${…}` with no secret values. The two Stripe
+  secrets use an empty default (`${STRIPE_SECRET_KEY:}`, `${STRIPE_WEBHOOK_SECRET:}`): the
+  configuration binder leaves an unresolvable placeholder as the literal text `${…}`, which would
+  fail the format check ("must be a test key") instead of reporting the missing variable; with an
+  empty default the constructor reports "Missing required configuration: …". An empty default is
+  not a secret.
   `.env.example` is extended with the new variables; `spring-dotenv` is NOT used — `compose.yaml`
   and the IDE/`mvnw` read `.env` explicitly (script `scripts/run-backend.ps1`/`.sh`). Masking:
   email and address logged in abbreviated form (`d***@g***.com`), never keys. Gitleaks: a

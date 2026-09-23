@@ -73,11 +73,11 @@ No "NEEDS CLARIFICATION" items — all choices are settled in research.md (R-01�
 
 | Principle | Requirement | How the plan satisfies it | Pre | Post |
 |---|---|---|---|---|
-| **I. Secrets** | env/`@ConfigurationProperties`, `.env` in `.gitignore`, `.env.example`, no `sk_` in the frontend, startup validation, gitleaks | `StripeProperties` with `@Validated` + `sk_test_`/`whsec_` patterns that block startup; `.env.example` extended with `STRIPE_*`, `DB_PASSWORD`, `APP_BASE_URL`; the frontend gets **no** key at all (hosted Checkout); gitleaks in pre-commit and CI; PII masking in logs (R-20). Observability: Grafana password only from `GRAFANA_ADMIN_PASSWORD` (missing → `compose up` aborts), no `admin/admin` and no anonymous access; metrics without secrets and PII, checked by the `MetricsEndpointIT` test (R-31, R-33) | ✅ | ✅ |
+| **I. Secrets** | env/`@ConfigurationProperties`, `.env` in `.gitignore`, `.env.example`, no `sk_` in the frontend, startup validation, gitleaks | `StripeProperties` validated in the record's compact constructor (`sk_test_`/`whsec_` patterns, messages without values) + `StripePropertiesFailureAnalyzer` — startup is blocked and the value never reaches the log (not `@Validated`/`@Pattern`, whose error prints the rejected value); `.env.example` extended with `STRIPE_*`, `DB_PASSWORD`, `APP_BASE_URL`; the frontend gets **no** key at all (hosted Checkout); gitleaks in pre-commit and CI; PII masking in logs (R-20). Observability: Grafana password only from `GRAFANA_ADMIN_PASSWORD` (missing → `compose up` aborts), no `admin/admin` and no anonymous access; metrics without secrets and PII, checked by the `MetricsEndpointIT` test (R-31, R-33) | ✅ | ✅ |
 | **II. Payments** | Stripe Checkout/Elements, server-side amount, grosze, webhook with signature only, `event.id` idempotency + idempotency key, test mode only | Hosted Checkout (SAQ A); amount from the immutable, server-priced order lines; `Money(long minor)`; `Webhook.constructEvent` + `livemode` rejection; table `processed_stripe_event` in the same transaction; `Idempotency-Key: checkout-{paymentId}`; comparison of `amount_total` with the total (R-11, R-12, R-14) | ✅ | ✅ |
 | **III. Modular DDD monolith** | BCs with layers and a Facade, communication via Facade/events, annotation-free domain, frontend via OpenAPI without business rules | BCs `catalog`, `cart`, `order`, `payment` + `shared`; no cycle thanks to `payment → order` events; ArchUnit enforces boundaries; contract `contracts/openapi.yaml`, the frontend only presents statuses/flags from the API (R-02, R-03, R-19). BC `fulfillment` — a separate feature (a temporary deviation from the "minimal set" — see Complexity Tracking). Metrics: `*Metrics` ports in each BC's `application/`, Micrometer adapters in `infrastructure/metrics/`; domain unchanged; a new ArchUnit rule — `io.micrometer..` only in `..infrastructure..` (R-27) | ✅ | ✅ |
 | **IV. Marketplace paths** | 4 independently testable P1 paths, quantity limits, showing price changes | US1–US4 mapped to routes and endpoints (`contracts/frontend-routes.md`); quantity rules in the `Cart` aggregate; `priceChanged` + `409 SUMMARY_OUTDATED`; E2E for every path | ✅ | ✅ |
-| **V. Isolated integrations** | port in `domain/`, adapter in `infrastructure/`, Outbox, timeouts/retries, Trello does not block a purchase | `PaymentGateway` port + Stripe adapter; 5 s/10 s timeouts, 2 retries; Stripe calls outside transactions; `outbox_event` written atomically with the payment; the purchase path has no dependency on Trello whatsoever (R-13, R-17). Stripe calls measured in the adapter (duration, outcome, retries — the adapter retries, not the SDK); pull-based metric collection, so a Prometheus/Grafana failure does not affect the purchase path (R-26, R-27) | ✅ | ✅ |
+| **V. Isolated integrations** | port in `domain/`, adapter in `infrastructure/`, Outbox, timeouts/retries, Trello does not block a purchase | `PaymentGateway` and `ProviderEventVerifier` ports + Stripe adapters; 5 s/10 s timeouts, 2 retries; Stripe calls outside transactions; `outbox_event` written atomically with the payment; the purchase path has no dependency on Trello whatsoever (R-13, R-17). Stripe calls measured in the adapter (duration, outcome, retries — the adapter retries, not the SDK); pull-based metric collection, so a Prometheus/Grafana failure does not affect the purchase path (R-26, R-27) | ✅ | ✅ |
 | **VI. Tests** | domain unit tests without Spring, `*Service` integration tests with Testcontainers, adapter contract tests, webhook with valid and forged signature, P1 E2E, no real secrets | Test matrix in R-21 and `contracts/stripe-webhook.md`; Playwright E2E + Stripe CLI with secrets from CI. Observability: matrix in R-34 — metrics adapter unit tests, counter assertions after commit and rollback in `*Service` tests, `MetricsEndpointIT`, `promtool test rules` for every rule (SC-011) | ✅ | ✅ |
 | **VII. YAGNI** | every additional component justified | No RabbitMQ, cache, Spring Security, Spring Session, Elasticsearch, Alertmanager, OpenTelemetry Collector or tracing. Stripe CLI (dev/E2E tool). **Prometheus + Grafana** — new containers, explicitly justified in the spec (US5, FR-032, explicit request of the owner) — entry in Complexity Tracking | ✅ | ✅ |
 | Stack and process | Java 21, Boot 4, SQL Server, React+Vite (approved here), OpenAPI, `docker compose up`, PR with gates | **We approve React 19 + Vite + TypeScript**; `compose.yaml`; CI: build, tests, gitleaks, dependency audit with `osv-scanner` (Maven + npm) and `npm audit` (R-18, R-22); `docker compose up -d` also starts Prometheus and Grafana; CI additionally: `promtool test rules`, `check-dashboards.mjs` (R-31, R-34) | ✅ | ✅ |
@@ -131,12 +131,12 @@ backend/
     │   ├── java/com/project/custom/
     │   │   ├── ShopApplication.java
     │   │   ├── shared/
-    │   │   │   ├── domain/                  # Money, GuestId, outbox/OutboxEventPublisher (port)
+    │   │   │   ├── domain/                  # Money, GuestId, PiiMasking (pure functions), outbox/OutboxEventPublisher (port)
     │   │   │   ├── api/                     # CorrelationFilter (X-Request-Id → MDC), GuestIdFilter (shop_guest cookie), GlobalExceptionHandler (ProblemDetail)
     │   │   │   └── infrastructure/
     │   │   │       ├── outbox/              # OutboxEventJpaEntity, JpaOutboxEventPublisher (adapter)
     │   │   │       ├── metrics/             # AfterCommit, OutboxMetrics, FlywayMetrics, MetricsConfig (MeterFilter: uri limit)
-    │   │   │       └── config/              # AppProperties (APP_BASE_URL), PII masking
+    │   │   │       └── config/              # AppProperties (APP_BASE_URL; also used by BC infrastructure adapters)
     │   │   ├── catalog/
     │   │   │   ├── CatalogQueryFacade.java, CatalogCommandFacade.java  # + public record DTOs
     │   │   │   ├── domain/                  # Product, Category, AvailabilityStatus, SearchCriteria, ProductRepository
@@ -159,12 +159,12 @@ backend/
     │   │   │   └── api/                     # OrderController
     │   │   └── payment/
     │   │       ├── PaymentFacade.java, PaymentConfirmedEvent.java, PaymentFailedEvent.java
-    │   │       ├── domain/                  # Payment, PaymentStatus, PaymentGateway (port), ProviderConfirmation, PaymentRepository
+    │   │       ├── domain/                  # Payment, PaymentStatus, PaymentGateway and ProviderEventVerifier (ports), ProviderConfirmation, PaymentRepository
     │   │       ├── application/             # PaymentService, WebhookHandlingService, PaymentMetrics (port), WebhookOutcome, PaymentOutcome
     │   │       ├── infrastructure/
     │   │       │   ├── persistence/         # PaymentJpaEntity, ProcessedEventJpaEntity
     │   │       │   ├── metrics/             # MicrometerPaymentMetrics
-    │   │       │   └── stripe/              # StripeProperties, StripePaymentGateway (+ retries and call metrics), StripeWebhookVerifier
+    │   │       │   └── stripe/              # StripeProperties, StripePaymentGateway (+ retries and call metrics), StripeWebhookVerifier (implements ProviderEventVerifier)
     │   │       └── api/                     # StripeWebhookController
     │   └── resources/
     │       ├── application.yaml, application-local.yaml   # + management.server.port=8081, exposure health,prometheus, histograms (R-26)
@@ -244,11 +244,13 @@ is shared: a copy in backend resources and the source of frontend types.
 5. **US4** order and payment: `order` + `payment`, Stripe adapter, webhook, Outbox, checkout and
    confirmation pages.
 6. **US5** observability — two parts:
-   - **Foundation** (in phase 1 with the rest of the skeleton, so that metrics ports exist before
-     the services are created): Actuator on `8081`, Prometheus registry, `AfterCommit`,
-     `CorrelationFilter`, ArchUnit rule for `io.micrometer`, Prometheus/Grafana containers with
-     provisioning.
-   - **US5 proper** (after US4): `*Metrics` ports and adapters wired into the US2–US4 services,
+   - **Foundation**: the Micrometer dependency, Actuator on `8081` and the ArchUnit rule for
+     `io.micrometer` are part of the skeleton (Setup/Foundational). The `AfterCommit` helper,
+     `CorrelationFilter` and the Prometheus/Grafana containers with provisioning belong to the US5
+     phase, but depend only on the foundation and `contracts/metrics.md`, so they can be built in
+     parallel with US1–US4.
+   - **US5 proper** (after US4): `*Metrics` ports and adapters added to the existing US2–US4
+     services (a deliberate retrofit — US1–US4 stay demonstrable without US5, Principle IV),
      Stripe and webhook metrics (including `payment_intent.payment_failed`), Outbox and Flyway
      gauges, rules + `promtool` tests, 4 dashboards, `MetricsEndpointIT`, `check-dashboards.mjs`.
 7. **Wrap-up**: E2E of the 4 paths, performance test on 500 products (including metrics overhead),

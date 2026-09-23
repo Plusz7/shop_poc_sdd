@@ -25,6 +25,7 @@ Add new terms here before using them.
 | `KorelacjaFilter`, `GoscIdFilter` | `CorrelationFilter`, `GuestIdFilter` |
 | `PoCommicie`, `OutboxMetryki`, `FlywayMetryki`, `MetrykiConfig` | `AfterCommit`, `OutboxMetrics`, `FlywayMetrics`, `MetricsConfig` |
 | `AppProperties` | `AppProperties` |
+| maskowanie danych osobowych | `PiiMasking` (in `shared.domain`) |
 
 ## Catalog
 
@@ -87,6 +88,7 @@ Add new terms here before using them.
 | `PlatnoscService`, `ObslugaWebhookaService`, `PlatnoscRepository` | `PaymentService`, `WebhookHandlingService`, `PaymentRepository` |
 | `PlatnoscJpaEntity`, `PrzetworzoneZdarzenieJpaEntity` | `PaymentJpaEntity`, `ProcessedEventJpaEntity` |
 | `StripeBramkaPlatnosci`, `PolitykaPonowienStripe` | `StripePaymentGateway`, `StripeRetryPolicy` |
+| — (webhook verification port, added after translation) | `ProviderEventVerifier.verify(payload, signatureHeader)` → `ProviderConfirmation`; exception `InvalidEventSignature`; Stripe adapter `StripeWebhookVerifier` |
 | Stripe metadata `zamowienieId`, `platnoscId`, `numer`; `Idempotency-Key: checkout-{platnoscId}` | `orderId`, `paymentId`, `number`; `checkout-{paymentId}` |
 
 ## Metrics ports and label enums
