@@ -564,7 +564,7 @@ w Technical Context planu nie zostaje żadne „NEEDS CLARIFICATION".
   | Endpoint metryk | `MetrykiEndpointIT` | R-33 |
   | Reguły alertów | `promtool check rules` + `promtool test rules observability/prometheus/tests/*.test.yml` (obraz `prom/prometheus` w CI) | każda reguła z FR-034 ma przypadek `firing` i `resolved` (SC-011) |
   | Dashboardy | `scripts/check-dashboards.mjs` w CI | poprawny JSON, `datasource.uid = prometheus`, każda metryka `shop_*` z zapytań istnieje w kontrakcie |
-  | Narzut | `WydajnoscKatalogIT` (T121) z metrykami (konfiguracja jak w produkcji) i raz z `management.metrics.enable.all=false` | różnica p95 < 5% lub < 5 ms (próg szumu) — SC-012 |
+  | Narzut | `WydajnoscKatalogIT` (T153) z metrykami (konfiguracja jak w produkcji) i raz z `management.metrics.enable.all=false` | różnica p95 < 5% lub < 5 ms (próg szumu) — SC-012 |
   | Ręcznie / demo | [quickstart.md](quickstart.md), US5 | dashboardy po `compose up` (SC-009), alerty wywołane na żywo |
 
 - **Rationale**: `promtool` testuje reguły deterministycznie i bez czekania 5 minut, więc

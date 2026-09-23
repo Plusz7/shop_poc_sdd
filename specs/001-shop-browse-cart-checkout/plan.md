@@ -116,7 +116,7 @@ specs/001-shop-browse-cart-checkout/
 │   └── frontend-routes.md   # trasy SPA, parametry URL, stany widoków
 ├── checklists/
 │   └── requirements.md
-└── tasks.md                 # Phase 2 — /speckit-tasks (do regeneracji: nie obejmuje jeszcze US5)
+└── tasks.md                 # Phase 2 — /speckit-tasks (US1–US5)
 ```
 
 ### Source Code (repository root)
