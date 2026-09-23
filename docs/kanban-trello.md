@@ -34,6 +34,22 @@ to the variables. If the token leaks, revoke it in your Trello account settings 
 - `tasks.md` is the source of truth for scope; Trello mirrors status. Make scope changes
   in `tasks.md` first, then sync the board.
 
+## Syncing `tasks.md` to the board
+
+[`scripts/sync-trello.ps1`](../scripts/sync-trello.ps1) mirrors a feature's `tasks.md` onto the board
+through the Trello REST API, using the same `TRELLO_*` variables:
+
+```powershell
+./scripts/sync-trello.ps1                                   # dry run
+./scripts/sync-trello.ps1 -Apply                            # default feature
+./scripts/sync-trello.ps1 -Feature 002-<name> -Apply
+```
+
+New tasks become cards in `Backlog` (or `Done` if already checked off); cards whose task has been
+checked off are moved to `Done`. Cards are matched by task ID, so re-running never creates
+duplicates, and cards moved by hand to `To Do`, `In Progress` or `Review` stay where they are until
+their task is completed.
+
 ## Updating the server
 
 The server version is pinned in `.mcp.json` (`@1.8.1`) so that a new npm package release does not
