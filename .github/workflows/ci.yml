@@ -85,7 +85,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
+      # The observability stack arrives with User Story 5; until then there is nothing to check
       - name: promtool check config / rules / test rules
+        if: hashFiles('observability/prometheus/prometheus.yml') != ''
         run: |
           # same image version as in compose.yaml
           PROM="docker run --rm -v $PWD/observability/prometheus:/etc/prometheus --entrypoint promtool prom/prometheus:v3.13.3"
@@ -93,6 +95,7 @@ jobs:
           $PROM check rules /etc/prometheus/rules/shop.yml
           $PROM test rules /etc/prometheus/tests/shop.test.yml
       - name: Dashboards and rules refer only to contract metrics
+        if: hashFiles('scripts/check-dashboards.mjs') != ''
         run: node scripts/check-dashboards.mjs
 
   e2e:
