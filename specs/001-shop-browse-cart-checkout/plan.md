@@ -59,15 +59,15 @@ Brak pozycji „NEEDS CLARIFICATION” — wszystkie wybory rozstrzygnięte w re
 |---|---|---|---|---|
 | **I. Sekrety** | env/`@ConfigurationProperties`, `.env` w `.gitignore`, `.env.example`, brak `sk_` we froncie, walidacja przy starcie, gitleaks | `StripeProperties` z `@Validated` + wzorce `sk_test_`/`whsec_` blokujące start; `.env.example` rozszerzony o `STRIPE_*`, `DB_PASSWORD`, `APP_BASE_URL`; frontend nie dostaje **żadnego** klucza (hostowany Checkout); gitleaks w pre-commit i CI; maskowanie PII w logach (R-20) | ✅ | ✅ |
 | **II. Płatności** | Stripe Checkout/Elements, kwota z serwera, grosze, tylko webhook z podpisem, idempotencja `event.id` + klucz idempotencji, tylko tryb testowy | Hostowany Checkout (SAQ A); kwota z niezmiennych pozycji zamówienia wycenionych serwerowo; `Pieniadze(long grosze)`; `Webhook.constructEvent` + odrzucenie `livemode`; tabela `przetworzone_zdarzenie_stripe` w tej samej transakcji; `Idempotency-Key: checkout-{platnoscId}`; porównanie `amount_total` z sumą (R-11, R-12, R-14) | ✅ | ✅ |
-| **III. Modularny monolit DDD** | BC z warstwami i Facade, komunikacja przez Facade/zdarzenia, domena bez adnotacji, frontend przez OpenAPI bez reguł biznesowych | BC `katalog`, `koszyk`, `zamowienie`, `platnosc` + `shared`; brak cyklu dzięki zdarzeniom `platnosc → zamowienie`; ArchUnit egzekwuje granice; kontrakt `contracts/openapi.yaml`, frontend tylko prezentuje statusy/flagi z API (R-02, R-03, R-19). BC `realizacja` — osobna funkcja (odstępstwo od „minimalnego zestawu” tylko czasowe, zob. niżej) | ✅ | ✅ |
+| **III. Modularny monolit DDD** | BC z warstwami i Facade, komunikacja przez Facade/zdarzenia, domena bez adnotacji, frontend przez OpenAPI bez reguł biznesowych | BC `katalog`, `koszyk`, `zamowienie`, `platnosc` + `shared`; brak cyklu dzięki zdarzeniom `platnosc → zamowienie`; ArchUnit egzekwuje granice; kontrakt `contracts/openapi.yaml`, frontend tylko prezentuje statusy/flagi z API (R-02, R-03, R-19). BC `realizacja` — osobna funkcja (odstępstwo od „minimalnego zestawu” tylko czasowe — zob. Complexity Tracking) | ✅ | ✅ |
 | **IV. Ścieżki marketplace** | 4 ścieżki P1 niezależnie testowalne, blokady ilości, pokazywanie zmiany ceny | US1–US4 zmapowane na trasy i endpointy (`contracts/frontend-routes.md`); reguły ilości w agregacie `Koszyk`; `cenaZmieniona` + `409 PODSUMOWANIE_NIEAKTUALNE`; E2E na każdą ścieżkę | ✅ | ✅ |
 | **V. Integracje odizolowane** | port w `domain/`, adapter w `infrastructure/`, Outbox, timeouty/ponowienia, Trello nie blokuje zakupu | Port `BramkaPlatnosci` + adapter Stripe; timeouty 5 s/10 s, 2 ponowienia; wywołania Stripe poza transakcją; `outbox_event` zapisywany atomowo z opłaceniem; brak jakiejkolwiek zależności ścieżki zakupu od Trello (R-13, R-17) | ✅ | ✅ |
 | **VI. Testy** | jednostkowe domeny bez Springa, integracyjne `*Service` z Testcontainers, kontraktowe adapterów, webhook z poprawnym i sfałszowanym podpisem, E2E P1, brak prawdziwych sekretów | Macierz testów w R-21 i `contracts/stripe-webhook.md`; E2E Playwright + Stripe CLI z sekretami z CI | ✅ | ✅ |
 | **VII. YAGNI** | każdy dodatkowy komponent uzasadniony | Bez RabbitMQ, cache, Spring Security, Spring Session, Elasticsearch; jedyny dodatkowy kontener to Stripe CLI (narzędzie dev/E2E, nie runtime aplikacji) | ✅ | ✅ |
-| Stos i proces | Java 21, Boot 4, SQL Server, React+Vite (zatwierdzany tutaj), OpenAPI, `docker compose up`, PR z bramkami | **Zatwierdzamy React 19 + Vite + TypeScript**; `compose.yaml`; CI: build, testy, gitleaks, audyt zależności (R-18, R-22) | ✅ | ✅ |
+| Stos i proces | Java 21, Boot 4, SQL Server, React+Vite (zatwierdzany tutaj), OpenAPI, `docker compose up`, PR z bramkami | **Zatwierdzamy React 19 + Vite + TypeScript**; `compose.yaml`; CI: build, testy, gitleaks, audyt zależności `osv-scanner` (Maven + npm) i `npm audit` (R-18, R-22) | ✅ | ✅ |
 
-**Wynik bramki**: PASS (przed Phase 0 i po Phase 1). Brak naruszeń wymagających
-Complexity Tracking.
+**Wynik bramki**: PASS (przed Phase 0 i po Phase 1) z 2 udokumentowanymi, czasowymi
+odstępstwami (zob. Complexity Tracking).
 
 **Uwagi do zgodności z `AGENTS.md`** (konwencje kodu, nie naruszenia):
 
@@ -78,6 +78,9 @@ Complexity Tracking.
   w osobnym PR — zgodnie z Governance konstytucji.
 - `realizacja` z minimalnego zestawu BC powstanie w funkcji integracji z Trello; ta funkcja
   dostarcza dla niej jedynie zdarzenie w Outboxie (zgodnie z założeniem spec).
+- `AGENTS.md` wymaga package-private `*Service`, ale `api/` i `application/` to różne pakiety
+  Javy, więc kontroler nie widziałby serwisu. Serwisy aplikacyjne są `public`, a ich użycie
+  poza własnym BC blokuje ArchUnit (T012). Aktualizacja `AGENTS.md` w osobnym PR.
 
 ## Project Structure
 
@@ -109,10 +112,10 @@ backend/
     │   ├── java/com/project/custom/
     │   │   ├── ShopApplication.java
     │   │   ├── shared/
-    │   │   │   ├── domain/                  # Pieniadze, GoscId
+    │   │   │   ├── domain/                  # Pieniadze, GoscId, outbox/OutboxEventPublisher (port)
     │   │   │   ├── api/                     # GoscIdFilter (ciasteczko shop_guest), GlobalExceptionHandler (ProblemDetail)
     │   │   │   └── infrastructure/
-    │   │   │       ├── outbox/              # OutboxEventJpaEntity, OutboxEventPublisher
+    │   │   │       ├── outbox/              # OutboxEventJpaEntity, JpaOutboxEventPublisher (adapter)
     │   │   │       └── config/              # AppProperties (APP_BASE_URL), maskowanie PII
     │   │   ├── katalog/
     │   │   │   ├── KatalogQueryFacade.java, KatalogCommandFacade.java  # + public record DTO
@@ -201,12 +204,13 @@ jest współdzielony: kopia w zasobach backendu i źródło typów frontendu.
    Outbox, strony zamówienia i potwierdzenia.
 6. **Domknięcie**: E2E 4 ścieżek, test wydajności na 500 produktach, przejście `quickstart.md`.
 
-US1–US3 nie zależą od Stripe i mogą być demonstrowane niezależnie (Zasada IV).
+US1–US3 nie wymagają konta ani połączenia ze Stripe i mogą być demonstrowane niezależnie
+(Zasada IV) — aplikacja startuje z atrapami kluczy w formacie `sk_test_…`/`whsec_…`
+(walidacja formatu z Zasad I/II obowiązuje zawsze).
 
 ## Complexity Tracking
 
-> Brak naruszeń Constitution Check — sekcja celowo pusta.
-
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
-| — | — | — |
+| Brak BC `realizacja` z minimalnego zestawu (Zasada III) | Spec wyłącza integrację z Trello do osobnej funkcji; ta funkcja dostarcza tylko zdarzenie `ZamowienieOplaconeEvent` w Outboxie | Pusty pakiet `realizacja` bez przypadków użycia to martwy kod (Zasada VII); BC powstanie w funkcji integracji z Trello |
+| Outbox bez joba wysyłki (Zasada V: „wysyłka przez job z ponawianiem”) | Nie ma jeszcze odbiorcy zdarzeń; zapis w jednej transakcji gwarantuje, że zdarzenie nie zginie (R-17) | Job bez handlerów to martwy kod; `OutboxEventSchedulerJob` powstanie razem z handlerem Trello w funkcji `realizacja` |

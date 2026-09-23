@@ -27,6 +27,10 @@ wszystkie scenariusze z sekcji 3 dają oczekiwany wynik, a sekcja 4 przechodzi n
    | `DB_PASSWORD` | dowolne silne hasło dla lokalnego SQL Server |
    | `APP_BASE_URL` | `http://localhost:5173` |
 
+   Do pracy nad US1–US3 bez konta Stripe wystarczą atrapy `STRIPE_SECRET_KEY=sk_test_dummy`
+   i `STRIPE_WEBHOOK_SECRET=whsec_dummy` — aplikacja wystartuje, a złożenie zamówienia zwróci
+   „Płatność chwilowo niedostępna” (`503`). Kroku 3 wtedy nie wykonujesz.
+
 2. Zależności (SQL Server + utworzenie bazy `shop`):
 
    ```bash

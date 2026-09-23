@@ -266,7 +266,8 @@ w Technical Context planu nie zostaje żadne „NEEDS CLARIFICATION".
 ## R-17. Outbox i RabbitMQ (Zasada V, VII)
 
 - **Decision**: w tej funkcji powstaje tabela `outbox_event` oraz komponent
-  `OutboxEventPublisher` (w `shared/infrastructure/outbox`) zapisujący w tej samej transakcji
+  port `OutboxEventPublisher` (w `shared/domain/outbox`, bez adnotacji frameworkowych)
+  z adapterem `JpaOutboxEventPublisher` (w `shared/infrastructure/outbox`) zapisujący w tej samej transakcji
   co oznaczenie zamówienia jako opłaconego zdarzenie `ZamowienieOplaconeEvent`
   (JSON: numer, pozycje, suma, dane dostawy — do przyszłej karty Trello). **Wysyłka**
   (`OutboxEventSchedulerJob` i handler Trello) należy do funkcji `realizacja`.
