@@ -171,8 +171,8 @@ backend/
     │       ├── db/seed/                     # R__seed_katalog.sql (profil local/e2e)
     │       └── static/images/
     └── test/java/com/project/custom/
-        ├── ArchitectureTest.java, OpenApiContractTest.java
-        ├── support/                         # IntegrationTest (Testcontainers), StripeWebhookSigner
+        ├── ArchitectureTest.java, OpenApiContractTest.java, MetrykiEndpointIT.java
+        ├── support/                         # IntegrationTest (Testcontainers), StripeWebhookSigner, MetrykiAssert
         ├── katalog/  koszyk/  zamowienie/  platnosc/   # domain/ (unit), application/ (integration), infrastructure/ (contract)
 
 frontend/
@@ -189,10 +189,22 @@ frontend/
     ├── unit/                # Vitest + Testing Library + MSW
     └── e2e/                 # Playwright: przegladanie, koszyk-dodawanie, koszyk-edycja, platnosc
 
-compose.yaml                 # sqlserver (+ init bazy), profil "stripe": stripe-cli listen
-.env.example                 # + STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, DB_PASSWORD, APP_BASE_URL
+observability/
+├── prometheus/
+│   ├── prometheus.yml       # scrape host.docker.internal:8081, interwał 15 s, rule_files
+│   ├── rules/shop.yml       # 9 reguł z contracts/metrics.md §4
+│   └── tests/shop.test.yml  # promtool: firing + resolved dla każdej reguły
+└── grafana/
+    ├── provisioning/
+    │   ├── datasources/prometheus.yaml   # uid: prometheus
+    │   └── dashboards/shop.yaml          # provider plików → folder „Sklep”
+    └── dashboards/          # http.json, sciezka-zakupowa.json, platnosci-integracje.json, jvm-baza.json
+
+scripts/check-dashboards.mjs # walidacja dashboardów i reguł względem contracts/metrics.md
+compose.yaml                 # sqlserver (+ init bazy), prometheus, grafana; profil "stripe": stripe-cli listen
+.env.example                 # + STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, DB_PASSWORD, APP_BASE_URL, GRAFANA_ADMIN_PASSWORD
 .pre-commit-config.yaml      # gitleaks
-.github/workflows/ci.yml     # backend verify, frontend test/lint/typecheck, gitleaks, audyt zależności, E2E (gdy są sekrety)
+.github/workflows/ci.yml     # backend verify, frontend test/lint/typecheck, gitleaks, audyt zależności, promtool, check-dashboards, E2E (gdy są sekrety)
 ```
 
 **Structure Decision**: aplikacja webowa w monorepo — `backend/` (jeden moduł Maven,
@@ -212,6 +224,10 @@ jest współdzielony: kopia w zasobach backendu i źródło typów frontendu.
    `zamowienie`: kontrola kwoty → `KatalogCommandFacade.zmniejszStan` →
    `OPLACONE` | `WYMAGA_WYJASNIENIA` → `KoszykCommandFacade.wyczysc` → `OutboxEvent` → commit → `200`.
 3. **Powrót klienta** (`/zamowienie/{numer}`): tylko odczyt i polling statusu — żadnej zmiany stanu.
+4. **Metryki** (przekrojowo): serwis aplikacyjny → port `Metryki*` → adapter Micrometer →
+   `PoCommicie` (zapis dopiero po commicie; rollback nic nie liczy) → rejestr → `:8081/actuator/prometheus`
+   ← Prometheus co 15 s → reguły alertów i dashboardy Grafany. Webhook: wynik weryfikacji/deduplikacji
+   → `shop.platnosc.webhook`, a po commicie `shop.platnosci` i opóźnienie względem `event.created`.
 
 ## Kolejność realizacji (wejście dla `/speckit-tasks`)
 
@@ -223,7 +239,15 @@ jest współdzielony: kopia w zasobach backendu i źródło typów frontendu.
 4. **US3** koszyk — edycja: PUT/DELETE, wycena ze zmianą ceny/dostępności, akceptacja cen.
 5. **US4** zamówienie i płatność: `zamowienie` + `platnosc`, adapter Stripe, webhook,
    Outbox, strony zamówienia i potwierdzenia.
-6. **Domknięcie**: E2E 4 ścieżek, test wydajności na 500 produktach, przejście `quickstart.md`.
+6. **US5** obserwowalność — dwie części:
+   - **Fundament** (w fazie 1 razem z resztą szkieletu, żeby porty metryk istniały, zanim
+     powstaną serwisy): Actuator na `8081`, rejestr Prometheus, `PoCommicie`, `KorelacjaFilter`,
+     reguła ArchUnit dla `io.micrometer`, kontenery Prometheus/Grafana z provisioningiem.
+   - **Właściwa US5** (po US4): porty i adaptery `Metryki*` wpięte w serwisy US2–US4, metryki
+     Stripe i webhooka (w tym `payment_intent.payment_failed`), gauge'e Outboxa i Flyway,
+     reguły + testy `promtool`, 4 dashboardy, `MetrykiEndpointIT`, `check-dashboards.mjs`.
+7. **Domknięcie**: E2E 4 ścieżek, test wydajności na 500 produktach (także narzut metryk),
+   przejście `quickstart.md` z sekcją US5.
 
 US1–US3 nie wymagają konta ani połączenia ze Stripe i mogą być demonstrowane niezależnie
 (Zasada IV) — aplikacja startuje z atrapami kluczy w formacie `sk_test_…`/`whsec_…`
@@ -235,3 +259,5 @@ US1–US3 nie wymagają konta ani połączenia ze Stripe i mogą być demonstrow
 |-----------|------------|-------------------------------------|
 | Brak BC `realizacja` z minimalnego zestawu (Zasada III) | Spec wyłącza integrację z Trello do osobnej funkcji; ta funkcja dostarcza tylko zdarzenie `ZamowienieOplaconeEvent` w Outboxie | Pusty pakiet `realizacja` bez przypadków użycia to martwy kod (Zasada VII); BC powstanie w funkcji integracji z Trello |
 | Outbox bez joba wysyłki (Zasada V: „wysyłka przez job z ponawianiem”) | Nie ma jeszcze odbiorcy zdarzeń; zapis w jednej transakcji gwarantuje, że zdarzenie nie zginie (R-17) | Job bez handlerów to martwy kod; `OutboxEventSchedulerJob` powstanie razem z handlerem Trello w funkcji `realizacja` |
+| Nowe kontenery Prometheus + Grafana (Zasada VII) | US5, FR-032/FR-033 i założenie spec („wyraźne życzenie właściciela projektu”): dashboardy i alerty bez ręcznej konfiguracji | Same metryki Actuatora bez Prometheusa — brak historii, zapytań `histogram_quantile` i reguł alertów; Grafana Cloud — zewnętrzne konto i sekret; Alertmanager — wysyłka powiadomień poza zakresem spec |
+| Reguła `OutboxZalegly` stale aktywna lokalnie do czasu funkcji `realizacja` (R-30) | FR-034 wymaga reguły teraz, a brak joba wysyłki (R-17) oznacza, że zdarzenia rzeczywiście czekają | Odłożenie reguły — niezgodne z FR-034; job oznaczający zdarzenia jako wysłane bez handlera — fałszuje metrykę; reguła oznaczona `wymaga="realizacja"` i opisana w dashboardzie |
