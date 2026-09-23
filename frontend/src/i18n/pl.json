@@ -1,0 +1,12 @@
+{
+  "app.name": "Sklep",
+  "app.skipToContent": "Przejdź do treści",
+  "header.home": "Strona główna sklepu",
+  "notFound.title": "Nie znaleziono strony",
+  "notFound.text": "Strona, której szukasz, nie istnieje.",
+  "notFound.backToShop": "Wróć do sklepu",
+  "common.loading": "Ładowanie…",
+  "common.error": "Nie udało się wczytać danych. Spróbuj ponownie.",
+  "common.retry": "Spróbuj ponownie",
+  "toast.close": "Zamknij powiadomienie"
+}
