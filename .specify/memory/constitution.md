@@ -1,169 +1,182 @@
+<!--
+Sync Impact Report
+- Version: 1.0.0 → 1.1.0 (MINOR: full translation to English + new "Language" rule in
+  Technology Stack and Constraints; no other change in meaning)
+- Renamed identifiers: bounded contexts `katalog`, `koszyk`, `zamowienie`, `platnosc`, `realizacja`
+  → `catalog`, `cart`, `order`, `payment`, `fulfillment` (see .claude/skills/english-only/glossary.md)
+- Templates: no changes required
+- Follow-up: AGENTS.md still says domain classes are named in Polish — update in a separate PR
+-->
+
 # Shop PoC Constitution
 
 ## Core Principles
 
-### I. Bezpieczeństwo sekretów i kluczy API (NON-NEGOTIABLE)
+### I. Security of Secrets and API Keys (NON-NEGOTIABLE)
 
-- Sekrety (Stripe secret key, Stripe webhook signing secret, Trello API key/token, hasła do bazy)
-  MUSZĄ być dostarczane wyłącznie przez zmienne środowiskowe lub menedżer sekretów
-  i wstrzykiwane przez `@ConfigurationProperties`/`@Value`. NIGDY w kodzie, w
-  `application.properties` commitowanym do repo, w testach ani w historii gita.
-- Lokalnie sekrety żyją w pliku `.env` (lub `application-local.properties`), który MUSI być
-  w `.gitignore`. Repozytorium zawiera jedynie `.env.example` z pustymi wartościami i opisem.
-- Frontend NIGDY nie otrzymuje sekretnych kluczy. Dopuszczalny jest wyłącznie Stripe
-  **publishable key** (`pk_...`); każda operacja wymagająca `sk_...` przechodzi przez backend.
-- Sekrety NIE MOGĄ pojawiać się w logach, komunikatach błędów, odpowiedziach API ani
-  w konfiguracji MCP commitowanej do repo (konfiguracja MCP odwołuje się do zmiennych
-  środowiskowych).
-- Aplikacja MUSI przy starcie zweryfikować obecność wymaganych sekretów i odmówić
-  uruchomienia z czytelnym komunikatem (bez ujawniania wartości), jeśli ich brakuje.
-- Repozytorium MUSI mieć skanowanie sekretów (np. `gitleaks`) jako hook pre-commit lub krok CI.
-- Wyciek klucza = natychmiastowa rotacja klucza u dostawcy, niezależnie od etapu PoC.
+- Secrets (Stripe secret key, Stripe webhook signing secret, Trello API key/token, database
+  passwords) MUST be supplied only through environment variables or a secret manager and
+  injected via `@ConfigurationProperties`/`@Value`. NEVER in code, in an `application.properties`
+  committed to the repository, in tests, or in git history.
+- Locally, secrets live in a `.env` file (or `application-local.properties`) that MUST be listed
+  in `.gitignore`. The repository contains only `.env.example` with empty values and descriptions.
+- The frontend NEVER receives secret keys. Only the Stripe **publishable key** (`pk_...`) is
+  allowed; every operation that requires `sk_...` goes through the backend.
+- Secrets MUST NOT appear in logs, error messages, API responses, or in MCP configuration
+  committed to the repository (MCP configuration refers to environment variables).
+- On startup the application MUST verify that all required secrets are present and refuse to
+  start with a clear message (without revealing values) if any are missing.
+- The repository MUST have secret scanning (e.g. `gitleaks`) as a pre-commit hook or CI step.
+- A leaked key = immediate rotation at the provider, regardless of the PoC stage.
 
-Uzasadnienie: klucz Stripe daje dostęp do operacji finansowych, token Trello do danych
-zespołu. Wyciek jest nieodwracalny, a koszt dyscypliny od pierwszego dnia jest minimalny.
+Rationale: a Stripe key grants access to financial operations, a Trello token to team data.
+A leak is irreversible, and the cost of discipline from day one is minimal.
 
-### II. Płatności wyłącznie przez Stripe, serwer jako źródło prawdy
+### II. Payments Only Through Stripe, Server as the Source of Truth
 
-- Dane kart płatniczych NIGDY nie przechodzą przez nasz frontend ani backend — używamy
-  Stripe Checkout lub Stripe Elements / Payment Element (zakres PCI DSS SAQ A).
-- Kwota do zapłaty MUSI być wyliczana po stronie serwera z aktualnych cen katalogu
-  i zawartości koszyka. Ceny i sumy przesłane z frontendu są ignorowane.
-- Kwoty pieniężne MUSZĄ być reprezentowane jako liczby całkowite w jednostkach
-  najmniejszych (grosze) lub `BigDecimal` z jawną walutą (domyślnie PLN). Zakaz `double`/`float`.
-- Zamówienie staje się opłacone WYŁĄCZNIE na podstawie zweryfikowanego webhooka Stripe
-  (weryfikacja podpisu `Stripe-Signature`), nigdy na podstawie przekierowania z frontendu.
-- Obsługa webhooków MUSI być idempotentna (deduplikacja po `event.id`); wywołania tworzące
-  płatność używają klucza idempotencji.
-- W PoC obowiązuje wyłącznie **tryb testowy** Stripe (`sk_test_...`/`pk_test_...`); klucz
-  produkcyjny w środowisku PoC jest błędem konfiguracji, który blokuje start aplikacji.
+- Card data NEVER passes through our frontend or backend — we use Stripe Checkout or Stripe
+  Elements / Payment Element (PCI DSS SAQ A scope).
+- The amount to pay MUST be calculated server-side from current catalog prices and cart
+  contents. Prices and totals sent by the frontend are ignored.
+- Monetary amounts MUST be represented as integers in minor units (grosze) or as `BigDecimal`
+  with an explicit currency (PLN by default). `double`/`float` are forbidden.
+- An order becomes paid ONLY on the basis of a verified Stripe webhook (`Stripe-Signature`
+  verification), never on the basis of a frontend redirect.
+- Webhook handling MUST be idempotent (deduplication by `event.id`); calls that create a
+  payment use an idempotency key.
+- The PoC uses Stripe **test mode** only (`sk_test_...`/`pk_test_...`); a live key in the PoC
+  environment is a configuration error that blocks application startup.
 
-Uzasadnienie: płatność to najbardziej ryzykowna część sklepu — zaufanie do klienta lub
-przekierowania prowadzi do zamówień „opłaconych" bez pieniędzy.
+Rationale: payment is the riskiest part of the shop — trusting the client or a redirect leads
+to "paid" orders without money.
 
-### III. Modularny monolit DDD z Bounded Contexts
+### III. Modular DDD Monolith with Bounded Contexts
 
-- Backend jest modularnym monolitem zgodnym z `AGENTS.md`: każdy Bounded Context to osobny
-  pakiet z warstwami `domain / application / infrastructure / api` i jedynym publicznym
-  wejściem przez `*Facade`.
-- Minimalny zestaw BC: `katalog` (produkty, kategorie, wyszukiwanie), `koszyk`,
-  `zamowienie`, `platnosc` (adapter Stripe), `realizacja` (integracja z Trello).
-- Komunikacja między BC wyłącznie przez Facade lub zdarzenia domenowe; zakaz sięgania do
-  repozytoriów i encji innego BC.
-- Encje domenowe są wolne od adnotacji frameworkowych; mapowanie na `*JpaEntity` w warstwie
-  infrastruktury.
-- Frontend jest osobną aplikacją komunikującą się z backendem wyłącznie przez udokumentowane
-  REST API (kontrakt OpenAPI). Frontend nie zawiera reguł biznesowych dotyczących cen,
-  dostępności ani statusu płatności — jedynie je prezentuje.
+- The backend is a modular monolith following `AGENTS.md`: each Bounded Context is a separate
+  package with `domain / application / infrastructure / api` layers and a single public entry
+  point through `*Facade`.
+- Minimal set of BCs: `catalog` (products, categories, search), `cart`, `order`, `payment`
+  (Stripe adapter), `fulfillment` (Trello integration).
+- Communication between BCs only through a Facade or domain events; reaching into another BC's
+  repositories and entities is forbidden.
+- Domain entities are free of framework annotations; mapping to `*JpaEntity` lives in the
+  infrastructure layer.
+- The frontend is a separate application that talks to the backend only through a documented
+  REST API (OpenAPI contract). The frontend contains no business rules for prices, availability
+  or payment status — it only presents them.
 
-Uzasadnienie: wyraźne granice pozwalają rozwijać PoC w stronę produktu bez przepisywania
-i izolują ryzykowne integracje od rdzenia domeny.
+Rationale: clear boundaries let the PoC grow into a product without a rewrite and isolate risky
+integrations from the domain core.
 
-### IV. Kluczowe ścieżki zakupowe wzorowane na marketplace
+### IV. Key Purchase Paths Modeled on Marketplaces
 
-Priorytetowe ścieżki użytkownika (P1) — każda MUSI być niezależnie testowalna i demonstrowalna:
+Priority user paths (P1) — each MUST be independently testable and demonstrable:
 
-1. **Przeglądanie sklepu** — lista produktów z paginacją, kategorie, wyszukiwanie po nazwie,
-   filtrowanie (np. cena) i sortowanie; karta produktu ze zdjęciem, opisem, ceną i dostępnością.
-2. **Dodawanie do koszyka** — z listy i z karty produktu, z wyborem ilości; natychmiastowa
-   informacja zwrotna (licznik koszyka w nagłówku), bez wymuszania logowania.
-3. **Edycja koszyka** — zmiana ilości, usuwanie pozycji, podgląd sum częściowych i sumy
-   całkowitej przeliczanej przez backend; koszyk gościa przetrwa odświeżenie strony.
-4. **Płatność** — przejście z koszyka do checkoutu, płatność Stripe, strona potwierdzenia
-   oraz obsługa płatności nieudanej/anulowanej bez utraty koszyka.
+1. **Browsing the shop** — paginated product list, categories, search by name, filtering
+   (e.g. price) and sorting; product page with image, description, price and availability.
+2. **Adding to cart** — from the list and from the product page, with quantity selection;
+   immediate feedback (cart counter in the header), without forcing a login.
+3. **Editing the cart** — changing quantities, removing lines, viewing line subtotals and the
+   total calculated by the backend; a guest cart survives a page refresh.
+4. **Payment** — moving from the cart to checkout, Stripe payment, confirmation page, and
+   handling of failed/canceled payments without losing the cart.
 
-Zasady UX inspirowane Allegro/eBay: dodanie produktu niedostępnego lub w ilości większej niż
-stan jest blokowane z czytelnym komunikatem; zmiana ceny między dodaniem do koszyka
-a płatnością jest pokazywana użytkownikowi przed zapłatą. Funkcje spoza P1 (opinie, licytacje,
-konta sprzedawców, rekomendacje) są poza zakresem, dopóki P1 nie działa end-to-end.
+UX rules inspired by Allegro/eBay: adding an unavailable product, or a quantity larger than the
+stock, is blocked with a clear message; a price change between adding to the cart and paying is
+shown to the user before payment. Features outside P1 (reviews, auctions, seller accounts,
+recommendations) are out of scope until P1 works end-to-end.
 
-Uzasadnienie: wartość PoC mierzymy tym, czy da się przejść pełną ścieżkę od przeglądania
-do opłaconego zamówienia.
+Rationale: we measure the PoC's value by whether the full path from browsing to a paid order
+can be completed.
 
-### V. Integracje zewnętrzne odizolowane i odporne na awarie
+### V. External Integrations Isolated and Resilient
 
-- Każda integracja (Stripe, Trello przez MCP/REST) jest schowana za portem (interfejsem
-  w `domain/`) z adapterem w `infrastructure/`. Logika domenowa nie zna SDK dostawcy.
-- Zdarzenia do systemów zewnętrznych (np. „zamówienie opłacone" → karta na tablicy Trello)
-  są wysyłane asynchronicznie przez wzorzec **Outbox**: zapis zmiany domenowej i `OutboxEvent`
-  w jednej transakcji, wysyłka przez job z ponawianiem.
-- Awaria lub niedostępność Trello NIE MOŻE blokować ani wycofywać zakupu i płatności.
-- Każde wywołanie zewnętrzne ma timeout, ograniczoną liczbę ponowień i logowanie błędu
-  (bez sekretów i danych osobowych).
-- Konfiguracja serwera MCP dla Trello odwołuje się do sekretów przez zmienne środowiskowe
-  (Zasada I).
+- Every integration (Stripe, Trello via MCP/REST) is hidden behind a port (an interface in
+  `domain/`) with an adapter in `infrastructure/`. Domain logic does not know the provider SDK.
+- Events for external systems (e.g. "order paid" → card on the Trello board) are sent
+  asynchronously through the **Outbox** pattern: the domain change and the `OutboxEvent` are
+  saved in one transaction, and a job with retries sends them.
+- A Trello failure or outage MUST NOT block or roll back a purchase or payment.
+- Every external call has a timeout, a bounded number of retries, and error logging (without
+  secrets or personal data).
+- The MCP server configuration for Trello refers to secrets through environment variables
+  (Principle I).
 
-Uzasadnienie: systemy zewnętrzne zawodzą; klient nie może stracić zamówienia, bo kanban
-jest chwilowo niedostępny.
+Rationale: external systems fail; a customer must not lose an order because the kanban board
+is temporarily unavailable.
 
-### VI. Testy na każdym poziomie ryzyka
+### VI. Tests at Every Risk Level
 
-- Logika domenowa (sumy koszyka, reguły ilości i dostępności, przejścia statusów zamówienia)
-  — testy jednostkowe bez kontekstu Springa.
-- Każdy przypadek użycia w `*Service` — test integracyjny `@SpringBootTest` z Testcontainers
-  (prawdziwa baza, bez mockowania repozytoriów).
-- Adaptery Stripe i Trello — testy kontraktowe na atrapach (np. `stripe-mock`, WireMock);
-  obsługa webhooka testowana z poprawnym i sfałszowanym podpisem.
-- Każda ścieżka P1 z Zasady IV — co najmniej jeden test end-to-end przez UI
-  (np. Playwright) z kartą testową Stripe.
-- Testy NIGDY nie używają prawdziwych sekretów z repozytorium; sekrety testowe pochodzą ze
-  zmiennych środowiskowych CI.
+- Domain logic (cart totals, quantity and availability rules, order status transitions) —
+  unit tests without a Spring context.
+- Every use case in a `*Service` — an `@SpringBootTest` integration test with Testcontainers
+  (real database, no repository mocks).
+- Stripe and Trello adapters — contract tests against fakes (e.g. `stripe-mock`, WireMock);
+  webhook handling tested with a valid and a forged signature.
+- Every P1 path from Principle IV — at least one end-to-end UI test (e.g. Playwright) with a
+  Stripe test card.
+- Tests NEVER use real secrets from the repository; test secrets come from CI environment
+  variables.
 
-Uzasadnienie: koszyk i płatność to miejsca, gdzie błąd kosztuje pieniądze i zaufanie.
+Rationale: the cart and payment are where a bug costs money and trust.
 
-### VII. Prostota Proof of Concept (YAGNI)
+### VII. Proof of Concept Simplicity (YAGNI)
 
-- Budujemy najprostsze rozwiązanie spełniające ścieżki P1. Każdy dodatkowy komponent
-  infrastrukturalny (broker wiadomości, cache, mikroserwis, Kubernetes) wymaga uzasadnienia
-  w sekcji „Complexity Tracking" planu.
-- Rezygnacje z zakresu (brak kont użytkowników, brak zwrotów, brak faktur) są dokumentowane
-  w specyfikacji jako świadome założenia, a nie pomijane milcząco.
-- Uproszczenia NIGDY nie dotyczą Zasad I i II — bezpieczeństwo sekretów i poprawność
-  płatności obowiązują w PoC w pełnym zakresie.
+- We build the simplest solution that satisfies the P1 paths. Every additional infrastructure
+  component (message broker, cache, microservice, Kubernetes) must be justified in the plan's
+  "Complexity Tracking" section.
+- Scope exclusions (no user accounts, no refunds, no invoices) are documented in the
+  specification as deliberate assumptions, not silently omitted.
+- Simplifications NEVER apply to Principles I and II — secret security and payment correctness
+  apply in full in the PoC.
 
-Uzasadnienie: PoC ma szybko udowodnić wykonalność, ale bez długu, którego nie da się spłacić.
+Rationale: the PoC must prove feasibility quickly, but without debt that cannot be repaid.
 
-## Stos technologiczny i ograniczenia
+## Technology Stack and Constraints
 
-- **Backend**: Java 21, Spring Boot 4.0, JPA/Hibernate, SQL Server (zgodnie z `AGENTS.md`);
-  constructor injection, bez `@Autowired` na polach, bez statycznego stanu.
-- **Asynchroniczność**: Outbox + job schedulera; RabbitMQ tylko jeśli plan wykaże potrzebę
-  (Zasada VII).
-- **Frontend**: SPA w TypeScript; domyślnie React + Vite — ostateczny wybór zatwierdzany
-  w `/speckit-plan`. Responsywny layout (mobile i desktop).
-- **Płatności**: Stripe (tryb testowy), Checkout Session lub Payment Element + webhooki.
-- **Kanban**: Trello, integracja przez serwer MCP i/lub REST API za portem `realizacja`.
-- **Kontrakt API**: OpenAPI generowane lub utrzymywane razem z kodem kontrolerów.
-- **Uruchomienie lokalne**: jedno polecenie (np. `docker compose up`) podnosi bazę i zależności;
-  wymagane sekrety opisane w `.env.example` i README.
-- **Dane osobowe**: zbieramy wyłącznie dane niezbędne do zamówienia (e-mail, adres dostawy);
-  nie logujemy ich w postaci jawnej.
+- **Backend**: Java 21, Spring Boot 4.0, JPA/Hibernate, SQL Server (per `AGENTS.md`);
+  constructor injection, no field `@Autowired`, no static state.
+- **Asynchrony**: Outbox + scheduler job; RabbitMQ only if the plan demonstrates the need
+  (Principle VII).
+- **Frontend**: TypeScript SPA; React + Vite by default — the final choice is approved in
+  `/speckit-plan`. Responsive layout (mobile and desktop).
+- **Payments**: Stripe (test mode), Checkout Session or Payment Element + webhooks.
+- **Kanban**: Trello, integrated through an MCP server and/or the REST API behind the
+  `fulfillment` port.
+- **API contract**: OpenAPI, generated or maintained together with the controller code.
+- **Local run**: a single command (e.g. `docker compose up`) starts the database and
+  dependencies; required secrets are described in `.env.example` and the README.
+- **Personal data**: we collect only the data needed for an order (email, shipping address);
+  we never log it in plain text.
+- **Language**: code, identifiers, documentation, specifications, tasks and commit messages are
+  written in English. Polish is allowed only in customer-facing UI copy (translation files).
 
-## Proces wytwórczy i bramki jakości
+## Development Process and Quality Gates
 
-- Praca prowadzona przez Spec Kit: `/speckit-specify` → `/speckit-clarify` → `/speckit-plan`
-  → `/speckit-tasks` → `/speckit-implement`. Plan MUSI zawierać „Constitution Check"
-  potwierdzający zgodność z Zasadami I–VII.
-- Zmiany trafiają przez gałęzie funkcjonalne i Pull Request; bezpośredni push na `main`
-  jest niedozwolony.
-- Bramki PR (wszystkie MUSZĄ przejść): build, testy jednostkowe i integracyjne, skan sekretów,
-  brak nowych ostrzeżeń bezpieczeństwa zależności o poziomie high/critical.
-- Review PR MUSI sprawdzić: brak sekretów w diffie, wyliczanie kwot po stronie serwera,
-  weryfikację podpisu webhooka, przestrzeganie granic BC.
-- Funkcja jest „gotowa", gdy jej ścieżka P1 przechodzi test end-to-end i jest opisana
-  w `quickstart.md` feature'a.
+- Work is driven by Spec Kit: `/speckit-specify` → `/speckit-clarify` → `/speckit-plan`
+  → `/speckit-tasks` → `/speckit-implement`. The plan MUST contain a "Constitution Check"
+  confirming compliance with Principles I–VII.
+- Changes land through feature branches and Pull Requests; pushing directly to `main` is
+  not allowed.
+- PR gates (all MUST pass): build, unit and integration tests, secret scan, no new high/critical
+  dependency security warnings.
+- PR review MUST check: no secrets in the diff, server-side amount calculation, webhook
+  signature verification, respect for BC boundaries.
+- A feature is "done" when its P1 path passes an end-to-end test and is described in the
+  feature's `quickstart.md`.
 
 ## Governance
 
-- Konstytucja ma pierwszeństwo przed innymi praktykami projektu. `AGENTS.md` uzupełnia ją
-  o szczegółowe konwencje kodu; w razie konfliktu obowiązuje konstytucja, a `AGENTS.md`
-  należy zaktualizować.
-- Zmiana konstytucji wymaga PR z opisem zmiany, uzasadnieniem, raportem wpływu (Sync Impact
-  Report) i planem migracji dla istniejącego kodu, jeśli zmiana go dotyczy.
-- Wersjonowanie semantyczne: MAJOR — usunięcie lub redefinicja zasady; MINOR — nowa zasada
-  lub istotne rozszerzenie; PATCH — doprecyzowania i poprawki redakcyjne.
-- Każdy plan i każdy PR weryfikuje zgodność z konstytucją; odstępstwo MUSI być jawnie
-  uzasadnione w „Complexity Tracking". Odstępstwa od Zasad I i II są niedopuszczalne.
-- Przegląd zgodności całego repozytorium odbywa się przy każdym kamieniu milowym PoC.
+- The constitution takes precedence over other project practices. `AGENTS.md` complements it
+  with detailed code conventions; in case of conflict the constitution wins and `AGENTS.md`
+  must be updated.
+- Amending the constitution requires a PR with a description of the change, a rationale, an
+  impact report (Sync Impact Report), and a migration plan for existing code if affected.
+- Semantic versioning: MAJOR — removal or redefinition of a principle; MINOR — a new principle
+  or a material expansion; PATCH — clarifications and editorial fixes.
+- Every plan and every PR verifies compliance with the constitution; any deviation MUST be
+  explicitly justified in "Complexity Tracking". Deviations from Principles I and II are not
+  allowed.
+- A compliance review of the whole repository takes place at every PoC milestone.
 
-**Version**: 1.0.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-09-23
+**Version**: 1.1.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-09-23
