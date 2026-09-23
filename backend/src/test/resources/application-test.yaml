@@ -1,0 +1,19 @@
+# Test profile - no real secrets (Principle VI). The datasource comes from Testcontainers (@ServiceConnection).
+spring:
+  flyway:
+    locations: classpath:db/migration,classpath:db/seed
+
+shop:
+  stripe:
+    secret-key: sk_test_dummy
+    # Test-only signing secret used by StripeWebhookSigner; not a secret of any Stripe account.
+    webhook-secret: whsec_test_c2hvcC1pbnRlZ3JhdGlvbi10ZXN0cw
+    # Tests pointing the adapter at stripe-mock/WireMock override this with @DynamicPropertySource.
+    api-base: http://localhost:12111
+  app:
+    base-url: http://localhost:5173
+
+management:
+  server:
+    # Random management port - tests must not collide with a local backend on 8081.
+    port: 0
