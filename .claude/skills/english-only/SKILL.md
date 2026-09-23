@@ -1,9 +1,9 @@
 ---
 name: english-only
-description: Pilnuje, żeby wszystko, co trafia do repozytorium shop_pof, było po angielsku — kod, nazwy (klasy, pakiety, BC, metody, zmienne, tabele, kolumny, endpointy, klucze JSON, i18n-klucze), komentarze, logi, komunikaty wyjątków, dokumentacja (specs/, docs/, README, konstytucja), zadania w tasks.md, karty Trello i commity. Użyj ZAWSZE przed tworzeniem lub edycją plików w repo, przy generowaniu spec/plan/tasks (speckit-*), przy przeglądzie kodu i gdy użytkownik pyta "po angielsku", "english", "nazewnictwo", "sprawdź język", "przetłumacz", "polskie nazwy".
+description: Pilnuje, żeby wszystko, co trafia do repozytorium shop_poc_sdd, było po angielsku — kod, nazwy (klasy, pakiety, BC, metody, zmienne, tabele, kolumny, endpointy, klucze JSON, i18n-klucze), komentarze, logi, komunikaty wyjątków, dokumentacja (specs/, docs/, README, konstytucja), zadania w tasks.md, karty Trello i commity. Użyj ZAWSZE przed tworzeniem lub edycją plików w repo, przy generowaniu spec/plan/tasks (speckit-*), przy przeglądzie kodu i gdy użytkownik pyta "po angielsku", "english", "nazewnictwo", "sprawdź język", "przetłumacz", "polskie nazwy".
 ---
 
-# English-only w shop_pof
+# English-only w shop_poc_sdd
 
 **Zasada:** wszystko, co ląduje w repozytorium albo w narzędziach zespołu, jest po angielsku.
 Rozmowa z użytkownikiem na czacie zostaje po polsku — to jedyny wyjątek.

@@ -1,9 +1,9 @@
 ---
 name: commit
-description: Tworzy commity w shop_pof zgodnie z Conventional Commits 1.0.0 i zasadami częstotliwości (jeden atomowy commit na zadanie T### / jeden bounded context). Użyj, gdy trzeba zrobić commit, wymyślić nazwę lub wiadomość commita, zdecydować, czy już pora commitować, albo podzielić duże zmiany na kilka commitów. Triggers: "commit", "zacommituj", "nazwa commita", "wiadomość commita", "podziel commit", "conventional commits".
+description: Tworzy commity w shop_poc_sdd zgodnie z Conventional Commits 1.0.0 i zasadami częstotliwości (jeden atomowy commit na zadanie T### / jeden bounded context). Użyj, gdy trzeba zrobić commit, wymyślić nazwę lub wiadomość commita, zdecydować, czy już pora commitować, albo podzielić duże zmiany na kilka commitów. Triggers: "commit", "zacommituj", "nazwa commita", "wiadomość commita", "podziel commit", "conventional commits".
 ---
 
-# Commity w shop_pof
+# Commity w shop_poc_sdd
 
 Commituj tylko wtedy, gdy użytkownik o to poprosił albo wprost upoważnił cię do tego
 (np. „commituj po każdym zadaniu”). Ten skill mówi, **jak** i **kiedy** — nie daje zgody.
