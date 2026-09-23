@@ -60,7 +60,7 @@ or connection — the application starts with dummy keys in the `sk_test_…`/`w
 - [X] T006 [P] Add the gitleaks hook in `.pre-commit-config.yaml` (Principle I)
 - [X] T007 [P] Add backend run scripts that read `.env` explicitly (no `spring-dotenv`, R-20) in `scripts/run-backend.ps1` and `scripts/run-backend.sh` (`local` profile)
 - [X] T008 [P] Configure frontend linting and formatting in `frontend/eslint.config.js` and `frontend/.prettierrc`; scripts `lint`, `typecheck`, `test`, `e2e`, `api:types` in `frontend/package.json`
-- [ ] T009 Copy the contract `specs/001-shop-browse-cart-checkout/contracts/openapi.yaml` to `backend/src/main/resources/openapi/shop-api.yaml` and generate the frontend types `frontend/src/api/schema.d.ts` with the `api:types` script (`openapi-typescript`, with a `--check` mode comparing against the contract)
+- [X] T009 Copy the contract `specs/001-shop-browse-cart-checkout/contracts/openapi.yaml` to `backend/src/main/resources/openapi/shop-api.yaml` and generate the frontend types `frontend/src/api/schema.d.ts` with the `api:types` script (`openapi-typescript`, with a `--check` mode comparing against the contract)
 - [ ] T010 Create the CI pipeline in `.github/workflows/ci.yml`: `./backend/mvnw -f backend/pom.xml verify`, `npm --prefix frontend ci` + `lint` + `typecheck` + `test` + `api:types -- --check`, `gitleaks detect`, dependency audit: `osv-scanner scan source --lockfile backend/pom.xml --lockfile frontend/package-lock.json` (fail at CVSS ≥ 7.0, exceptions only through `backend/osv-scanner.toml` with a justification) and `npm --prefix frontend audit --audit-level=high`, an E2E job run only when the `STRIPE_TEST_*` secrets are set
 
 ---
