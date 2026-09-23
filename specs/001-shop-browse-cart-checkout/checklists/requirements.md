@@ -1,4 +1,4 @@
-# Specification Quality Checklist: Przeglądanie sklepu, koszyk i płatność
+# Specification Quality Checklist: Shop Browsing, Cart and Checkout
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-09-23
@@ -31,9 +31,8 @@
 
 ## Notes
 
-- Stripe jest wymieniony tylko w Assumptions jako decyzja biznesowa (wybór operatora płatności
-  wskazany przez użytkownika); wymagania mówią o „zewnętrznym operatorze płatności".
-- Decyzje przyjęte domyślnie (do ewentualnej weryfikacji w `/speckit-clarify`): zakupy jako gość,
-  brak rezerwacji stanu na czas płatności, dostawa 0 zł, tylko płatność kartą, brak e-maila
-  z potwierdzeniem.
-- Walidacja: 1 iteracja, wszystkie punkty spełnione.
+- Stripe is mentioned only in Assumptions as a business decision (the payment provider chosen by
+  the user); the requirements refer to an "external payment provider".
+- Decisions taken by default (to be verified in `/speckit-clarify` if needed): guest checkout, no
+  stock reservation during payment, 0 PLN shipping, card payment only, no confirmation email.
+- Validation: 1 iteration, all items pass.

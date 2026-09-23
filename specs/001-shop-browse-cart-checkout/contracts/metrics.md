@@ -1,99 +1,100 @@
-# Kontrakt: metryki, reguły alertów i dashboardy (US5)
+# Contract: metrics, alert rules and dashboards (US5)
 
-**Feature**: `001-shop-browse-cart-checkout` | [plan.md](../plan.md) | decyzje: R-26–R-34 w
+**Feature**: `001-shop-browse-cart-checkout` | [plan.md](../plan.md) | decisions: R-26–R-34 in
 [research.md](../research.md)
 
-Ten plik jest **źródłem prawdy** dla nazw i etykiet metryk. `MetrykiEndpointIT` porównuje
-zbiór metryk `shop_*` z tabelą w sekcji 2, a `scripts/check-dashboards.mjs` sprawdza,
-że dashboardy i reguły odwołują się wyłącznie do metryk z tego pliku (R-33, R-34).
+This file is the **source of truth** for metric names and labels. `MetricsEndpointIT` compares the
+set of `shop_*` metrics with the table in section 2, and `scripts/check-dashboards.mjs` checks that
+dashboards and rules refer only to metrics from this file (R-33, R-34).
 
 ## 1. Endpoint
 
-| Element | Wartość |
+| Item | Value |
 |---|---|
-| Adres | `http://<host>:8081/actuator/prometheus` (port zarządzania, **nie** `8080`) |
-| Inne endpointy na `8081` | `/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness` |
-| Na porcie `8080` | `/actuator/**` → `404` |
+| Address | `http://<host>:8081/actuator/prometheus` (management port, **not** `8080`) |
+| Other endpoints on `8081` | `/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness` |
+| On port `8080` | `/actuator/**` → `404` |
 | Format | Prometheus text exposition (Micrometer) |
-| Scrape | Prometheus co 15 s, job `shop-backend` |
-| Wspólna etykieta | `application="shop"` na każdej metryce |
+| Scrape | Prometheus every 15 s, job `shop-backend` |
+| Common label | `application="shop"` on every metric |
 
-## 2. Metryki domenowe `shop_*`
+## 2. Domain metrics `shop_*`
 
-Nazwy w notacji Micrometera (w kodzie) → nazwa w Prometheusie. Wszystkie kombinacje etykiet
-są **rejestrowane z wartością 0 przy starcie**, aby `increase()` i reguły typu „brak zdarzeń”
-działały od pierwszej minuty.
+Names in Micrometer notation (in code) → name in Prometheus. All label combinations are
+**registered with value 0 at startup**, so that `increase()` and "no events" rules work from the
+first minute.
 
-| Micrometer | Prometheus | Typ | Etykiety (zamknięty zbiór) | Kiedy rośnie | FR |
+| Micrometer | Prometheus | Type | Labels (closed set) | Increments when | FR |
 |---|---|---|---|---|---|
-| `shop.koszyk.dodania` | `shop_koszyk_dodania_total` | counter | — | po commicie dodania pozycji do koszyka (`POST /api/koszyk/pozycje` → 2xx) | FR-027 |
-| `shop.zamowienia.utworzone` | `shop_zamowienia_utworzone_total` | counter | — | po commicie TX1 utworzenia zamówienia | FR-027 |
-| `shop.zamowienia.rozbieznosci` | `shop_zamowienia_rozbieznosci_total` | counter | `rodzaj`: `CENA`, `DOSTEPNOSC`, `SKLAD` | `409 PODSUMOWANIE_NIEAKTUALNE` (jedna inkrementacja na rodzaj wykryty w żądaniu) | FR-027, FR-016 |
-| `shop.zamowienia.zakonczone` | `shop_zamowienia_zakonczone_total` | counter | `status`: `OPLACONE`, `PLATNOSC_NIEUDANA`, `WYMAGA_WYJASNIENIA` | po commicie zmiany statusu na docelowy | FR-027 |
-| `shop.zamowienia.oplacone.wartosc` (base unit `pln`) | `shop_zamowienia_oplacone_wartosc_pln_total` | counter | — | po commicie `OPLACONE`, o `suma.grosze / 100` (tylko prezentacja — nie służy do obliczeń pieniężnych) | FR-027 |
-| `shop.zamowienie.czas.do.oplacenia` | `shop_zamowienie_czas_do_oplacenia_seconds_{bucket,count,sum}` | timer (histogram; kubełki 30 s, 1 min, 2 min, 5 min, 10 min, 30 min) | — | po commicie `OPLACONE`: `oplacono − utworzono` | FR-028 |
-| `shop.platnosci` | `shop_platnosci_total` | counter | `wynik`: `udana`, `odrzucona`, `anulowana` | mapowanie zdarzeń Stripe — R-28 | FR-027 |
-| `shop.platnosc.webhook` | `shop_platnosc_webhook_total` | counter | `wynik`: `przetworzone`, `zduplikowane`, `odrzucony_podpis`, `odrzucony_livemode`, `zignorowane` | każde żądanie na webhook, wg wyniku kroku weryfikacji/deduplikacji ([stripe-webhook.md](stripe-webhook.md)) | FR-028 |
-| `shop.platnosc.opoznienie.potwierdzenia` | `shop_platnosc_opoznienie_potwierdzenia_seconds_{bucket,count,sum}` | timer (histogram; kubełki 1, 5, 10, 30, 60, 120 s) | — | po commicie obsługi `przetworzone` zdarzeń zmieniających status: `teraz − event.created` | FR-028, SC-007 |
-| `shop.stripe.wywolania` | `shop_stripe_wywolania_seconds_{bucket,count,sum}` | timer (histogram; kubełki 100 ms, 300 ms, 1 s, 3 s, 10 s) | `operacja`: `utworz_sesje`, `wygas_sesje`; `wynik`: `sukces`, `blad`, `timeout` | każda **próba** wywołania Stripe w adapterze | FR-028 |
-| `shop.stripe.ponowienia` | `shop_stripe_ponowienia_total` | counter | `operacja`: jw. | każda ponowna próba (adapter ponawia sam, `maxNetworkRetries=0` w SDK) | FR-028 |
-| `shop.outbox.oczekujace` | `shop_outbox_oczekujace` | gauge | — | liczba `outbox_event` z `wyslano IS NULL` (bufor 15 s) | FR-029 |
-| `shop.outbox.najstarsze` (base unit `seconds`) | `shop_outbox_najstarsze_seconds` | gauge | — | wiek najstarszego niewysłanego zdarzenia; `0`, gdy brak | FR-029 |
-| `shop.flyway.migracje` | `shop_flyway_migracje` | gauge | `stan`: `success`, `failed`, `pending` | liczba migracji w danym stanie, wyliczana raz po starcie | FR-030 |
+| `shop.cart.additions` | `shop_cart_additions_total` | counter | — | after commit of adding a line to the cart (`POST /api/cart/lines` → 2xx) | FR-027 |
+| `shop.orders.created` | `shop_orders_created_total` | counter | — | after commit of the order-creating TX1 | FR-027 |
+| `shop.orders.mismatches` | `shop_orders_mismatches_total` | counter | `kind`: `PRICE`, `AVAILABILITY`, `CONTENTS` | `409 SUMMARY_OUTDATED` (one increment per kind detected in the request) | FR-027, FR-016 |
+| `shop.orders.completed` | `shop_orders_completed_total` | counter | `status`: `PAID`, `PAYMENT_FAILED`, `NEEDS_REVIEW` | after commit of a status change to a target state | FR-027 |
+| `shop.orders.paid.value` (base unit `pln`) | `shop_orders_paid_value_pln_total` | counter | — | after commit of `PAID`, by `total.minor / 100` (presentation only — never used for monetary calculations) | FR-027 |
+| `shop.order.time.to.payment` | `shop_order_time_to_payment_seconds_{bucket,count,sum}` | timer (histogram; buckets 30 s, 1 min, 2 min, 5 min, 10 min, 30 min) | — | after commit of `PAID`: `paidAt − createdAt` | FR-028 |
+| `shop.payments` | `shop_payments_total` | counter | `outcome`: `succeeded`, `declined`, `canceled` | mapping of Stripe events — R-28 | FR-027 |
+| `shop.payment.webhook` | `shop_payment_webhook_total` | counter | `outcome`: `processed`, `duplicate`, `rejected_signature`, `rejected_livemode`, `ignored` | every webhook request, by the outcome of the verification/deduplication step ([stripe-webhook.md](stripe-webhook.md)) | FR-028 |
+| `shop.payment.confirmation.delay` | `shop_payment_confirmation_delay_seconds_{bucket,count,sum}` | timer (histogram; buckets 1, 5, 10, 30, 60, 120 s) | — | after commit of handling `processed` status-changing events: `now − event.created` | FR-028, SC-007 |
+| `shop.stripe.calls` | `shop_stripe_calls_seconds_{bucket,count,sum}` | timer (histogram; buckets 100 ms, 300 ms, 1 s, 3 s, 10 s) | `operation`: `create_session`, `expire_session`; `outcome`: `success`, `error`, `timeout` | every Stripe call **attempt** in the adapter | FR-028 |
+| `shop.stripe.retries` | `shop_stripe_retries_total` | counter | `operation`: as above | every retry (the adapter retries itself, `maxNetworkRetries=0` in the SDK) | FR-028 |
+| `shop.outbox.pending` | `shop_outbox_pending` | gauge | — | number of `outbox_event` rows with `sent_at IS NULL` (15 s cache) | FR-029 |
+| `shop.outbox.oldest` (base unit `seconds`) | `shop_outbox_oldest_seconds` | gauge | — | age of the oldest unsent event; `0` when none | FR-029 |
+| `shop.flyway.migrations` | `shop_flyway_migrations` | gauge | `state`: `success`, `failed`, `pending` | number of migrations in a given state, computed once after startup | FR-030 |
 
-**Zakazane w etykietach i nazwach** (FR-031, test SC-012): e-mail, imię i nazwisko, adres,
-numer zamówienia (`ZAM-…`), identyfikatory Stripe (`cs_…`, `pi_…`, `evt_…`), `GoscId`,
-identyfikator korelacji, fraza wyszukiwania, klucze (`sk_…`, `whsec_…`).
+**Forbidden in labels and names** (FR-031, test SC-012): email, full name, address, order number
+(`ORD-…`), Stripe identifiers (`cs_…`, `pi_…`, `evt_…`), `GuestId`, correlation identifier, search
+phrase, keys (`sk_…`, `whsec_…`).
 
-## 3. Metryki wbudowane (Spring Boot / Micrometer / Prometheus)
+## 3. Built-in metrics (Spring Boot / Micrometer / Prometheus)
 
-| Metryka | Źródło | Użycie |
+| Metric | Source | Usage |
 |---|---|---|
-| `http_server_requests_seconds_{bucket,count,sum}` z etykietami `method`, `uri` (szablon), `status`, `outcome`, `exception` | Spring MVC; `percentiles-histogram=true`, SLO 100 ms/300 ms/500 ms/1 s/2 s | dashboard HTTP, alerty 5xx i p95 (FR-026) |
-| `jvm_memory_*`, `jvm_gc_*`, `jvm_threads_*` | Micrometer JVM | dashboard JVM (FR-030) |
-| `hikaricp_connections_{active,idle,pending}`, `hikaricp_connections_acquire_seconds_*` | HikariCP | dashboard bazy (FR-030) |
-| `process_uptime_seconds`, `process_cpu_usage`, `application_ready_time_seconds` | Boot | dashboard JVM |
-| `up{job="shop-backend"}` | Prometheus | alert niedostępności |
+| `http_server_requests_seconds_{bucket,count,sum}` with labels `method`, `uri` (template), `status`, `outcome`, `exception` | Spring MVC; `percentiles-histogram=true`, SLO 100 ms/300 ms/500 ms/1 s/2 s | HTTP dashboard, 5xx and p95 alerts (FR-026) |
+| `jvm_memory_*`, `jvm_gc_*`, `jvm_threads_*` | Micrometer JVM | JVM dashboard (FR-030) |
+| `hikaricp_connections_{active,idle,pending}`, `hikaricp_connections_acquire_seconds_*` | HikariCP | database dashboard (FR-030) |
+| `process_uptime_seconds`, `process_cpu_usage`, `application_ready_time_seconds` | Boot | JVM dashboard |
+| `up{job="shop-backend"}` | Prometheus | unavailability alert |
 
-Stan liveness/readiness: `/actuator/health/{liveness,readiness}` na `8081` (readiness obejmuje
-`db`); Prometheus mierzy dostępność przez `up`.
+Liveness/readiness state: `/actuator/health/{liveness,readiness}` on `8081` (readiness includes
+`db`); Prometheus measures availability through `up`.
 
-## 4. Reguły alertów (`observability/prometheus/rules/shop.yml`)
+## 4. Alert rules (`observability/prometheus/rules/shop.yml`)
 
-Grupa `shop`, `interval: 15s`. Każda reguła ma etykiety `application="shop"`, `waga`
-(`krytyczny` | `ostrzezenie`) oraz adnotacje `summary` (po polsku) i `dashboard` (link do
-panelu). Każda ma przypadek `firing` i `resolved` w `observability/prometheus/tests/shop.test.yml`
+Group `shop`, `interval: 15s`. Every rule has the labels `application="shop"`, `severity`
+(`critical` | `warning`) and the annotations `summary` (in English) and `dashboard` (link to the
+panel). Each has a `firing` and a `resolved` case in `observability/prometheus/tests/shop.test.yml`
 (SC-011).
 
-| Alert | Wyrażenie (PromQL) | `for` | Waga | FR-034 |
+| Alert | Expression (PromQL) | `for` | Severity | FR-034 |
 |---|---|---|---|---|
-| `WysokiOdsetekBledow5xx` | `sum(rate(http_server_requests_seconds_count{application="shop",status=~"5.."}[5m])) / sum(rate(http_server_requests_seconds_count{application="shop"}[5m])) > 0.05` | 5m | krytyczny | 5xx > 5% |
-| `WolneOdpowiedziKataloguKoszyka` | `histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{application="shop",uri=~"/api/produkty\|/api/koszyk"}[5m]))) > 1` | 5m | ostrzezenie | p95 > 1 s (SC-003) |
-| `SfalszowanePotwierdzeniePlatnosci` | `increase(shop_platnosc_webhook_total{wynik="odrzucony_podpis"}[5m]) > 0` | 0m | krytyczny | potwierdzenie z błędnym podpisem |
-| `BledyOperatoraPlatnosci` | `sum(rate(shop_stripe_wywolania_seconds_count{wynik!="sukces"}[5m])) / sum(rate(shop_stripe_wywolania_seconds_count[5m])) > 0.2` | 5m | krytyczny | błędy/timeouty > 20% |
-| `OpoznionePotwierdzeniaPlatnosci` | `histogram_quantile(0.95, sum by (le) (rate(shop_platnosc_opoznienie_potwierdzenia_seconds_bucket[5m]))) > 30` | 5m | krytyczny | „Opłacone” > 30 s (SC-007, R-29a) |
-| `BrakPotwierdzenPlatnosci` | `(sum(increase(shop_zamowienia_utworzone_total[15m])) > 0) and on() (sum(increase(shop_platnosc_webhook_total{wynik=~"przetworzone\|zduplikowane"}[15m])) == 0)` | 5m | krytyczny | jw. — brak webhooków (R-29b) |
-| `ZamowienieWymagaWyjasnienia` | `increase(shop_zamowienia_zakonczone_total{status="WYMAGA_WYJASNIENIA"}[10m]) > 0` | 0m | ostrzezenie | pojawienie się „Wymaga wyjaśnienia” |
-| `OutboxZalegly` | `shop_outbox_najstarsze_seconds > 300` | 0m | ostrzezenie, dodatkowo `wymaga="realizacja"` | najstarsze zdarzenie > 5 min (R-30: w tej funkcji odpala po każdym opłaconym zamówieniu — brak joba wysyłki) |
-| `SklepNiedostepny` | `up{job="shop-backend"} == 0` | 1m | krytyczny | brak odczytu metryk przez 1 min |
+| `HighServerErrorRate` | `sum(rate(http_server_requests_seconds_count{application="shop",status=~"5.."}[5m])) / sum(rate(http_server_requests_seconds_count{application="shop"}[5m])) > 0.05` | 5m | critical | 5xx > 5% |
+| `SlowCatalogOrCartResponses` | `histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{application="shop",uri=~"/api/products\|/api/cart"}[5m]))) > 1` | 5m | warning | p95 > 1 s (SC-003) |
+| `ForgedPaymentConfirmation` | `increase(shop_payment_webhook_total{outcome="rejected_signature"}[5m]) > 0` | 0m | critical | confirmation with an invalid signature |
+| `PaymentProviderErrors` | `sum(rate(shop_stripe_calls_seconds_count{outcome!="success"}[5m])) / sum(rate(shop_stripe_calls_seconds_count[5m])) > 0.2` | 5m | critical | errors/timeouts > 20% |
+| `DelayedPaymentConfirmations` | `histogram_quantile(0.95, sum by (le) (rate(shop_payment_confirmation_delay_seconds_bucket[5m]))) > 30` | 5m | critical | "Paid" > 30 s (SC-007, R-29a) |
+| `MissingPaymentConfirmations` | `(sum(increase(shop_orders_created_total[15m])) > 0) and on() (sum(increase(shop_payment_webhook_total{outcome=~"processed\|duplicate"}[15m])) == 0)` | 5m | critical | as above — no webhooks (R-29b) |
+| `OrderNeedsReview` | `increase(shop_orders_completed_total{status="NEEDS_REVIEW"}[10m]) > 0` | 0m | warning | a "Needs review" order appears |
+| `OutboxBacklog` | `shop_outbox_oldest_seconds > 300` | 0m | warning, plus `requires="fulfillment"` | oldest event > 5 min (R-30: in this feature it fires after every paid order — no dispatch job) |
+| `ShopDown` | `up{job="shop-backend"} == 0` | 1m | critical | no metrics scrape for 1 min |
 
-(`\|` w tabeli to `|` w PromQL.)
+(`\|` in the table is `|` in PromQL.)
 
-## 5. Dashboardy (`observability/grafana/dashboards/*.json`, FR-033)
+## 5. Dashboards (`observability/grafana/dashboards/*.json`, FR-033)
 
-Źródło danych: `uid: prometheus`. Zmienna dashboardu `$application` (domyślnie `shop`).
-Liczniki zawsze przez `rate`/`increase` (edge case: restart zeruje liczniki).
+Data source: `uid: prometheus`. Dashboard variable `$application` (default `shop`).
+Counters always through `rate`/`increase` (edge case: a restart resets counters).
 
-| Plik | Tytuł | Panele (minimum) |
+| File | Title | Panels (minimum) |
 |---|---|---|
-| `http.json` | Sklep — HTTP | żądania/s per `uri`; odsetek 4xx i 5xx; p50/p95/p99 per `uri` (`histogram_quantile`); tabela top 5 najwolniejszych `uri`; stan alertów `WysokiOdsetekBledow5xx`, `WolneOdpowiedziKataloguKoszyka` |
-| `sciezka-zakupowa.json` | Sklep — ścieżka zakupowa | lejek: dodania do koszyka → zamówienia utworzone → `OPLACONE` (`increase` w wybranym zakresie); zamówienia wg `status`; płatności wg `wynik` (udana/odrzucona/anulowana osobnymi seriami); wartość opłaconych zamówień w PLN; rozbieżności wg `rodzaj` |
-| `platnosci-integracje.json` | Sklep — płatności i integracje | wywołania Stripe wg `operacja`/`wynik`; p95 czasu wywołań; ponowienia; webhooki wg `wynik` (w tym `odrzucony_podpis`); p95 opóźnienia potwierdzenia vs próg 30 s; rozkład czasu do opłacenia; Outbox: oczekujące i najstarsze (panel opisany „oczekuje na funkcję realizacja”) |
-| `jvm-baza.json` | Sklep — JVM i baza | heap/non-heap; pauzy GC; wątki; CPU procesu; uptime; HikariCP active/idle/pending i czas pozyskania połączenia; migracje Flyway wg `stan`; `up` |
+| `http.json` | Shop — HTTP | requests/s per `uri`; 4xx and 5xx rate; p50/p95/p99 per `uri` (`histogram_quantile`); table of the top 5 slowest `uri`; alert state of `HighServerErrorRate`, `SlowCatalogOrCartResponses` |
+| `purchase-funnel.json` | Shop — purchase funnel | funnel: cart additions → orders created → `PAID` (`increase` over the selected range); orders by `status`; payments by `outcome` (succeeded/declined/canceled as separate series); value of paid orders in PLN; mismatches by `kind` |
+| `payments-integrations.json` | Shop — payments and integrations | Stripe calls by `operation`/`outcome`; p95 call duration; retries; webhooks by `outcome` (including `rejected_signature`); p95 confirmation delay vs the 30 s threshold; time-to-payment distribution; Outbox: pending and oldest (panel labeled "waiting for the fulfillment feature") |
+| `jvm-database.json` | Shop — JVM and database | heap/non-heap; GC pauses; threads; process CPU; uptime; HikariCP active/idle/pending and connection acquisition time; Flyway migrations by `state`; `up` |
 
-## 6. Nagłówek korelacji (R-32)
+## 6. Correlation header (R-32)
 
-Każda odpowiedź API (`8080`) zawiera `X-Request-Id`. Żądanie może go podać (`^[A-Za-z0-9-]{8,64}$`),
-inaczej backend generuje UUID. Wartość jest w logach (`[requestId]`), **nigdy** w metrykach.
-Nagłówek nie zmienia ścieżek, metod ani kodów odpowiedzi, więc `openapi.yaml` opisuje go jako
-wspólny nagłówek odpowiedzi (`components.headers.X-Request-Id`), bez zmian w operacjach.
+Every API response (`8080`) contains `X-Request-Id`. A request may supply it
+(`^[A-Za-z0-9-]{8,64}$`), otherwise the backend generates a UUID. The value appears in logs
+(`[requestId]`), **never** in metrics. The header does not change paths, methods or response codes,
+so `openapi.yaml` describes it as a shared response header (`components.headers.X-Request-Id`),
+without changes to operations.

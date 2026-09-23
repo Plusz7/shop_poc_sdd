@@ -1,59 +1,63 @@
-# Kontrakt UI: trasy i stan w URL (frontend SPA)
+# UI contract: routes and URL state (frontend SPA)
 
 **Feature**: `001-shop-browse-cart-checkout` | API: [openapi.yaml](openapi.yaml)
 
-Frontend prezentuje dane z API i nie zawiera reguł cen, dostępności ani statusu płatności
-(Zasada III). Wszystkie kwoty formatowane `Intl.NumberFormat('pl-PL', {style: 'currency', currency: 'PLN'})`.
+The frontend presents data from the API and contains no price, availability or payment status rules
+(Principle III). All amounts are formatted with
+`Intl.NumberFormat('pl-PL', {style: 'currency', currency: 'PLN'})`.
 
-## Trasy
+UI texts below are English renderings; the exact Polish copy lives in the translation file
+(`pl.json`) under the given meaning, and components refer to it by key only.
 
-| Trasa | Widok | Źródło danych | Historia / FR |
+## Routes
+
+| Route | View | Data source | Story / FR |
 |---|---|---|---|
-| `/` | Lista produktów + nawigacja kategorii + wyszukiwarka + filtry | `GET /api/kategorie`, `GET /api/produkty` | US1, FR-001–FR-004 |
-| `/produkt/:id` | Karta produktu, wybór ilości, „Dodaj do koszyka" | `GET /api/produkty/{id}`, `POST /api/koszyk/pozycje` | US1-6, US2, FR-005 |
-| `/koszyk` | Koszyk: pozycje, zmiana ilości, usuwanie, wyczyszczenie, sumy, komunikaty | `/api/koszyk*` | US3, FR-009–FR-011 |
-| `/zamowienie` | Formularz danych + podsumowanie → przekierowanie do Stripe | `GET /api/koszyk`, `POST /api/zamowienia` | US4-1..3, US4-7 |
-| `/zamowienie/:numer` | Potwierdzenie z numerem, pozycjami, sumą i statusem; polling co 2 s | `GET /api/zamowienia/{numer}` | US4-4, US4-6, FR-023 |
-| `*` | 404 z linkiem do sklepu | — | |
+| `/` | Product list + category navigation + search box + filters | `GET /api/categories`, `GET /api/products` | US1, FR-001–FR-004 |
+| `/product/:id` | Product page, quantity selection, "Add to cart" | `GET /api/products/{id}`, `POST /api/cart/lines` | US1-6, US2, FR-005 |
+| `/cart` | Cart: lines, quantity change, removal, clearing, totals, messages | `/api/cart*` | US3, FR-009–FR-011 |
+| `/checkout` | Details form + summary → redirect to Stripe | `GET /api/cart`, `POST /api/orders` | US4-1..3, US4-7 |
+| `/orders/:number` | Confirmation with number, lines, total and status; polling every 2 s | `GET /api/orders/{number}` | US4-4, US4-6, FR-023 |
+| `*` | 404 with a link to the shop | — | |
 
-Nagłówek (każda strona): logo/link `/`, wyszukiwarka, link `/koszyk` z licznikiem
-`koszyk.liczbaSztuk` (FR-013) — zapytanie TanStack Query `['koszyk']`, unieważniane po każdej
-mutacji koszyka i po powrocie ze Stripe.
+Header (every page): logo/link `/`, search box, link `/cart` with the counter `cart.itemCount`
+(FR-013) — TanStack Query key `['cart']`, invalidated after every cart mutation and after returning
+from Stripe.
 
-## Parametry URL listy produktów (FR-004 — link do wyników da się udostępnić)
+## Product list URL parameters (FR-004 — a link to the results can be shared)
 
-| Parametr URL | Parametr API | Uwagi |
+| URL parameter | API parameter | Notes |
 |---|---|---|
-| `kategoria` | `kategoria` | slug |
-| `q` | `q` | wyszukiwanie zatwierdzane Enterem/przyciskiem |
-| `cenaOd`, `cenaDo` | te same | w UI w złotych, w URL i API w groszach |
-| `sort` | `sort` | `nazwa_asc` (domyślny, pomijany w URL), `cena_asc`, `cena_desc` |
-| `strona` | `strona - 1` | w URL numeracja od 1 (przyjazna), w API od 0 |
+| `category` | `category` | slug |
+| `q` | `q` | search submitted with Enter/button |
+| `minPrice`, `maxPrice` | same | in PLN in the UI, in grosze in the URL and API |
+| `sort` | `sort` | `name_asc` (default, omitted from the URL), `price_asc`, `price_desc` |
+| `page` | `page - 1` | numbered from 1 in the URL (friendly), from 0 in the API |
 
-Zmiana filtra/sortowania resetuje `strona` do 1; zmiana strony zachowuje filtry (US1-7).
-Pusta lista → komunikat „Brak wyników" + przycisk „Wyczyść filtry" (nawigacja do `/`) (US1-5).
+Changing a filter/sort resets `page` to 1; changing the page keeps the filters (US1-7).
+Empty list → "No results" message + "Clear filters" button (navigates to `/`) (US1-5).
 
-## Stany widoku koszyka i zamówienia
+## Cart and order view states
 
-| Stan z API | Prezentacja |
+| State from the API | Presentation |
 |---|---|
-| `koszyk.pozycje = []` | „Twój koszyk jest pusty" + link do sklepu; brak przycisku zamówienia (US3-5) |
-| `pozycja.cenaZmieniona` | cena aktualna + przekreślona `poprzedniaCenaGrosze` + baner „Cena zmieniła się" i przycisk „Rozumiem" → `POST /api/koszyk/akceptuj-ceny` (US3-6) |
-| `pozycja.status = NIEDOSTEPNY` | pozycja wyszarzona, etykieta „Niedostępny", tylko akcja „Usuń" (US3-7) |
-| `koszyk.moznaZamowic = false` | przycisk „Przejdź do zamówienia" nieaktywny z podpowiedzią |
-| `komunikaty[kod=ILOSC_OGRANICZONA]` | toast „Dostępnych jest tylko N szt." (US3-3) |
-| `409 ILOSC_PRZEKRACZA_LIMIT` przy dodawaniu | toast „Możesz dodać maksymalnie N szt." (US2-3) |
-| `?platnosc=anulowana` na `/koszyk` | baner „Płatność nie została zakończona. Twój koszyk czeka." (US4-5) |
-| `409 PODSUMOWANIE_NIEAKTUALNE` | podsumowanie zastąpione `problem.koszyk`, baner „Ceny lub dostępność zmieniły się — sprawdź i potwierdź ponownie" (US4-7) |
-| `400 BLAD_WALIDACJI` | komunikaty przy polach wg `bledy[].pole` (US4-2) |
-| `503 PLATNOSC_NIEDOSTEPNA` | „Płatność chwilowo niedostępna, spróbuj za chwilę" |
-| zamówienie `OCZEKUJE_NA_PLATNOSC` na `/zamowienie/:numer` | „Płatność w trakcie weryfikacji" + spinner; po 60 s bez zmiany: „Weryfikacja trwa dłużej — odśwież stronę później" (US4-6) |
-| `OPLACONE` | „Dziękujemy! Zamówienie opłacone" + unieważnienie `['koszyk']` (licznik = 0) (US4-4) |
-| `PLATNOSC_NIEUDANA` | „Płatność nieudana" + link do koszyka |
-| `WYMAGA_WYJASNIENIA` | „Płatność przyjęta — skontaktujemy się w sprawie realizacji" |
-| `404` | „Nie znaleziono zamówienia" (bez rozróżnienia cudze/nieistniejące) |
+| `cart.lines = []` | "Your cart is empty" + link to the shop; no checkout button (US3-5) |
+| `line.priceChanged` | current price + struck-through `previousPriceMinor` + "Price has changed" banner and an "I understand" button → `POST /api/cart/accept-prices` (US3-6) |
+| `line.status = UNAVAILABLE` | line greyed out, "Unavailable" label, only the "Remove" action (US3-7) |
+| `cart.canPlaceOrder = false` | "Proceed to checkout" button disabled with a hint |
+| `messages[code=QUANTITY_CAPPED]` | toast "Only N items available" (US3-3) |
+| `409 QUANTITY_EXCEEDS_LIMIT` when adding | toast "You can add at most N items" (US2-3) |
+| `?payment=canceled` on `/cart` | banner "The payment was not completed. Your cart is waiting." (US4-5) |
+| `409 SUMMARY_OUTDATED` | summary replaced with `problem.cart`, banner "Prices or availability have changed — review and confirm again" (US4-7) |
+| `400 VALIDATION_ERROR` | messages next to fields per `errors[].field` (US4-2) |
+| `503 PAYMENT_UNAVAILABLE` | "Payment temporarily unavailable, please try again shortly" |
+| order `AWAITING_PAYMENT` on `/orders/:number` | "Payment being verified" + spinner; after 60 s without a change: "Verification is taking longer — refresh the page later" (US4-6) |
+| `PAID` | "Thank you! Order paid" + invalidation of `['cart']` (counter = 0) (US4-4) |
+| `PAYMENT_FAILED` | "Payment failed" + link to the cart |
+| `NEEDS_REVIEW` | "Payment received — we will contact you about fulfillment" |
+| `404` | "Order not found" (no distinction between someone else's and non-existent) |
 
-## Dostępność i responsywność
+## Accessibility and responsiveness
 
-Layout od 360 px (mobile) do desktopu; siatka produktów 2/3/4 kolumny. Formularze z `<label>`,
-błędy powiązane `aria-describedby`, przyciski nieaktywne z `aria-disabled` i wyjaśnieniem.
+Layout from 360 px (mobile) to desktop; product grid with 2/3/4 columns. Forms with `<label>`,
+errors linked with `aria-describedby`, disabled buttons with `aria-disabled` and an explanation.

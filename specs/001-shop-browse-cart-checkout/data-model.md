@@ -1,317 +1,318 @@
-# Data Model: Przeglądanie sklepu, koszyk i płatność
+# Data Model: Shop Browsing, Cart and Checkout
 
 **Feature**: `001-shop-browse-cart-checkout` | **Date**: 2026-09-23 | **Plan**: [plan.md](plan.md)
 
-Model podzielony na Bounded Contexts (Zasada III). Encje domenowe są wolne od adnotacji
-frameworkowych; kolumny opisują tabele `*JpaEntity` w `infrastructure/persistence`.
-Między BC **nie ma kluczy obcych** — odwołania przez identyfikator (np. `produkt_id`
-w koszyku), spójność pilnowana przez fasady. Wszystkie kwoty: `BIGINT` w groszach, PLN (R-07).
-Czasy: `DATETIMEOFFSET(3)` w UTC.
+The model is split into Bounded Contexts (Principle III). Domain entities are free of framework
+annotations; the columns describe the `*JpaEntity` tables in `infrastructure/persistence`.
+There are **no foreign keys between BCs** — references go by identifier (e.g. `product_id` in the
+cart), consistency is enforced by the facades. All amounts: `BIGINT` in grosze (minor units), PLN
+(R-07). Timestamps: `DATETIMEOFFSET(3)` in UTC.
 
-## Wspólne jądro (`shared`)
+## Shared kernel (`shared`)
 
-| Typ | Rodzaj | Opis / niezmienniki |
+| Type | Kind | Description / invariants |
 |---|---|---|
-| `Pieniadze` | Value Object | `long grosze ≥ 0`, `waluta = PLN`; `plus`, `razy(int)`; porównanie po wartości |
-| `GoscId` | Value Object | UUID z ciasteczka `shop_guest` (R-08); nigdy pusty |
-| `OutboxEvent` | Encja infrastruktury | patrz tabela `outbox_event` |
+| `Money` | Value Object | `long minor ≥ 0`, `currency = PLN`; `plus`, `times(int)`; compared by value |
+| `GuestId` | Value Object | UUID from the `shop_guest` cookie (R-08); never empty |
+| `OutboxEvent` | Infrastructure entity | see table `outbox_event` |
 
-### Tabela `outbox_event`
+### Table `outbox_event`
 
-| Kolumna | Typ | Ograniczenia |
+| Column | Type | Constraints |
 |---|---|---|
 | `id` | `UNIQUEIDENTIFIER` | PK |
-| `typ` | `NVARCHAR(100)` | NOT NULL, np. `ZamowienieOplacone` |
-| `agregat_id` | `NVARCHAR(50)` | NOT NULL (numer zamówienia) |
-| `ladunek` | `NVARCHAR(MAX)` | NOT NULL, JSON |
-| `utworzono` | `DATETIMEOFFSET(3)` | NOT NULL |
-| `wyslano` | `DATETIMEOFFSET(3)` | NULL — wypełnia job z funkcji `realizacja` |
-| `proby` | `INT` | NOT NULL DEFAULT 0 |
+| `type` | `NVARCHAR(100)` | NOT NULL, e.g. `OrderPaid` |
+| `aggregate_id` | `NVARCHAR(50)` | NOT NULL (order number) |
+| `payload` | `NVARCHAR(MAX)` | NOT NULL, JSON |
+| `created_at` | `DATETIMEOFFSET(3)` | NOT NULL |
+| `sent_at` | `DATETIMEOFFSET(3)` | NULL — filled by the job of the `fulfillment` feature |
+| `attempts` | `INT` | NOT NULL DEFAULT 0 |
 
-Indeks: `(wyslano, utworzono)` — pod przyszły job wysyłki.
+Index: `(sent_at, created_at)` — for the future dispatch job.
 
 ---
 
-## BC `katalog`
+## BC `catalog`
 
-### Kategoria
+### Category
 
-| Pole | Typ domenowy | Kolumna | Reguły |
+| Field | Domain type | Column | Rules |
 |---|---|---|---|
-| id | `KategoriaId(long)` | `id BIGINT IDENTITY` PK | |
-| nazwa | `String` | `nazwa NVARCHAR(80)` | NOT NULL, unikalna |
-| slug | `String` | `slug VARCHAR(80)` | NOT NULL, unikalny, `[a-z0-9-]+` — używany w URL (`?kategoria=elektronika`) |
-| kolejnosc | `int` | `kolejnosc INT` | kolejność w nawigacji |
+| id | `CategoryId(long)` | `id BIGINT IDENTITY` PK | |
+| name | `String` | `name NVARCHAR(80)` | NOT NULL, unique |
+| slug | `String` | `slug VARCHAR(80)` | NOT NULL, unique, `[a-z0-9-]+` — used in the URL (`?category=electronics`) |
+| displayOrder | `int` | `display_order INT` | order in the navigation |
 
-Płaska lista, bez podkategorii (założenie spec).
+Flat list, no subcategories (spec assumption).
 
-### Produkt (agregat)
+### Product (aggregate)
 
-| Pole | Typ domenowy | Kolumna | Reguły |
+| Field | Domain type | Column | Rules |
 |---|---|---|---|
-| id | `ProduktId(long)` | `id BIGINT IDENTITY` PK | |
-| nazwa | `String` | `nazwa NVARCHAR(200) COLLATE Polish_100_CI_AI` | NOT NULL; kolacja dla FR-003 (R-05) |
-| opis | `String` | `opis NVARCHAR(4000)` | |
-| cena | `Pieniadze` | `cena_grosze BIGINT` | NOT NULL, `> 0` (CHECK) |
-| kategoriaId | `KategoriaId` | `kategoria_id BIGINT` FK → `kategoria` | NOT NULL (FK w obrębie BC) |
-| stan | `int` | `stan INT` | NOT NULL, `≥ 0` (CHECK) |
-| aktywny | `boolean` | `aktywny BIT` | NOT NULL; nieaktywny = „usunięty z katalogu" |
-| zdjecia | `List<Zdjecie>` | tabela `produkt_zdjecie` | min. 1; główne = `kolejnosc 0` |
-| wersja | — | `wersja BIGINT` (`@Version`) | optymistyczne blokowanie |
+| id | `ProductId(long)` | `id BIGINT IDENTITY` PK | |
+| name | `String` | `name NVARCHAR(200) COLLATE Polish_100_CI_AI` | NOT NULL; collation for FR-003 (R-05) |
+| description | `String` | `description NVARCHAR(4000)` | |
+| price | `Money` | `price_minor BIGINT` | NOT NULL, `> 0` (CHECK) |
+| categoryId | `CategoryId` | `category_id BIGINT` FK → `category` | NOT NULL (FK within the BC) |
+| stock | `int` | `stock INT` | NOT NULL, `≥ 0` (CHECK) |
+| active | `boolean` | `active BIT` | NOT NULL; inactive = "removed from the catalog" |
+| images | `List<ProductImage>` | table `product_image` | min. 1; main = `display_order 0` |
+| version | — | `version BIGINT` (`@Version`) | optimistic locking |
 
-**Status dostępności (wyliczany, FR-005)**:
+**Availability status (derived, FR-005)**:
 
-| Warunek | `StatusDostepnosci` |
+| Condition | `AvailabilityStatus` |
 |---|---|
-| `!aktywny` lub `stan = 0` | `NIEDOSTEPNY` |
-| `1 ≤ stan ≤ 3` | `OSTATNIE_SZTUKI` |
-| `stan > 3` | `DOSTEPNY` |
+| `!active` or `stock = 0` | `UNAVAILABLE` |
+| `1 ≤ stock ≤ 3` | `LOW_STOCK` |
+| `stock > 3` | `AVAILABLE` |
 
-**Operacje domenowe**: `statusDostepnosci()`, `maksDoKupienia() = min(stan, 99)`,
-`czyMoznaZmniejszyc(n)`, `zmniejszStan(n)` (rzuca, gdy `n > stan`).
+**Domain operations**: `availabilityStatus()`, `maxPurchasable() = min(stock, 99)`,
+`canDecreaseStock(n)`, `decreaseStock(n)` (throws when `n > stock`).
 
-### Tabela `produkt_zdjecie`
+### Table `product_image`
 
-| Kolumna | Typ | Ograniczenia |
+| Column | Type | Constraints |
 |---|---|---|
-| `produkt_id` | `BIGINT` | FK → `produkt`, część PK |
-| `kolejnosc` | `INT` | część PK, `≥ 0` |
-| `url` | `NVARCHAR(300)` | NOT NULL, ścieżka względna `/images/...` |
+| `product_id` | `BIGINT` | FK → `product`, part of PK |
+| `display_order` | `INT` | part of PK, `≥ 0` |
+| `url` | `NVARCHAR(300)` | NOT NULL, relative path `/images/...` |
 | `alt` | `NVARCHAR(200)` | NOT NULL |
 
-**Indeksy**: `produkt(kategoria_id, aktywny, cena_grosze)`, `produkt(aktywny, cena_grosze)`,
-`produkt(aktywny, nazwa)` (R-24).
+**Indexes**: `product(category_id, active, price_minor)`, `product(active, price_minor)`,
+`product(active, name)` (R-24).
 
-**Kryteria wyszukiwania (`KryteriaWyszukiwania`, VO)**: `kategoriaSlug?`, `fraza?`
-(trim, maks. 100 znaków, znaki `LIKE` escapowane), `cenaOd?`, `cenaDo?` (`cenaOd ≤ cenaDo`,
-inaczej zamiana/400), `sortowanie ∈ {CENA_ROSNACO, CENA_MALEJACO, NAZWA}`, `strona ≥ 0`,
-`rozmiar ∈ [1, 48]` (domyślnie 24).
-
----
-
-## BC `koszyk`
-
-### Koszyk (agregat)
-
-| Pole | Typ domenowy | Kolumna | Reguły |
-|---|---|---|---|
-| id | `KoszykId(UUID)` | `id UNIQUEIDENTIFIER` PK | |
-| goscId | `GoscId` | `gosc_id UNIQUEIDENTIFIER` | NOT NULL, UNIQUE — jeden koszyk na przeglądarkę |
-| pozycje | `List<PozycjaKoszyka>` | tabela `pozycja_koszyka` | maks. 1 pozycja na produkt |
-| zmieniono | `Instant` | `zmieniono DATETIMEOFFSET(3)` | aktualizowane przy każdej zmianie (FR-012) |
-| wersja | `long` | `wersja BIGINT` (`@Version`) | optymistyczne blokowanie (dwie karty) |
-
-### PozycjaKoszyka (encja w agregacie)
-
-| Pole | Typ domenowy | Kolumna | Reguły |
-|---|---|---|---|
-| produktId | `long` | `produkt_id BIGINT` | część PK `(koszyk_id, produkt_id)`; bez FK (inny BC) |
-| ilosc | `int` | `ilosc INT` | `1..99` (CHECK) |
-| cenaPrzyDodaniu | `Pieniadze` | `cena_przy_dodaniu_grosze BIGINT` | tylko do wykrywania zmiany ceny (R-09); nigdy do wyceny |
-| dodano | `Instant` | `dodano DATETIMEOFFSET(3)` | kolejność wyświetlania |
-
-**Reguły agregatu** (R-10, testy jednostkowe):
-
-| Operacja | Zachowanie |
-|---|---|
-| `dodaj(produkt, n)` | `n ∈ 1..99`; istniejąca pozycja → `ilosc += n` (FR-007); jeśli wynik > `produkt.maksDoKupienia` → `IloscPrzekraczaLimit(maks)` i brak zmian (US2-3, FR-008); produkt `NIEDOSTEPNY` → `ProduktNiedostepny` (US2-4) |
-| `zmienIlosc(produktId, n)` | `n = 0` → usuń pozycję (US3-4); `n > maks` → ustaw `maks` i zwróć `IloscOgraniczona(maks)` (US3-3); `n < 0` → błąd |
-| `usun(produktId)` | usuwa pozycję; brak pozycji → no-op (idempotentne) |
-| `wyczysc()` | usuwa wszystkie pozycje (FR-009, FR-021) |
-| `akceptujCeny(ceny)` | nadpisuje `cenaPrzyDodaniu` aktualnymi cenami (R-09) |
-
-### WycenionyKoszyk (read model, nie utrwalany)
-
-Wynik `KoszykService.wycen(goscId)` z danych `KatalogQueryFacade` — zwracany przez API i przez
-`KoszykQueryFacade` do BC `zamowienie`:
-
-| Pole | Opis |
-|---|---|
-| `pozycje[]` | `produktId, nazwa, zdjecieUrl, cenaJednostkowa (aktualna), ilosc, wartosc, status, maksIlosc, cenaZmieniona, poprzedniaCena?, iloscPrzekraczaStan` |
-| `liczbaSztuk` | suma `ilosc` wszystkich pozycji (licznik w nagłówku, FR-013) |
-| `suma` | suma `wartosc` pozycji dostępnych (FR-010) |
-| `moznaZamowic` | niepusty ∧ każda pozycja dostępna ∧ `ilosc ≤ maksIlosc` (FR-014) |
-| `problemy[]` | `CENA_ZMIENIONA`, `PRODUKT_NIEDOSTEPNY`, `ILOSC_PRZEKRACZA_STAN` z `produktId` |
+**Search criteria (`SearchCriteria`, VO)**: `categorySlug?`, `query?`
+(trimmed, max. 100 characters, `LIKE` characters escaped), `minPrice?`, `maxPrice?`
+(`minPrice ≤ maxPrice`, otherwise swap/400), `sort ∈ {PRICE_ASC, PRICE_DESC, NAME}`, `page ≥ 0`,
+`size ∈ [1, 48]` (default 24).
 
 ---
 
-## BC `zamowienie`
+## BC `cart`
 
-### Zamowienie (agregat)
+### Cart (aggregate)
 
-| Pole | Typ domenowy | Kolumna | Reguły |
+| Field | Domain type | Column | Rules |
 |---|---|---|---|
-| id | `ZamowienieId(UUID)` | `id UNIQUEIDENTIFIER` PK | |
-| numer | `NumerZamowienia` | `numer VARCHAR(14)` | UNIQUE; `ZAM-` + 10 znaków Crockford Base32 (R-15) |
-| goscId | `GoscId` | `gosc_id UNIQUEIDENTIFIER` | NOT NULL; właściciel (FR-023); indeks |
-| klient | `DaneKlienta` | kolumny `email`, `imie_nazwisko` | patrz VO |
-| adres | `AdresDostawy` | `ulica`, `kod_pocztowy`, `miejscowosc`, `kraj` | patrz VO |
-| pozycje | `List<PozycjaZamowienia>` | tabela `pozycja_zamowienia` | niezmienne po utworzeniu (FR-017), min. 1 |
-| suma | `Pieniadze` | `suma_grosze BIGINT` | = Σ wartości pozycji (FR-024), dostawa 0 zł |
-| status | `StatusZamowienia` | `status VARCHAR(30)` | patrz maszyna stanów |
-| utworzono | `Instant` | `utworzono DATETIMEOFFSET(3)` | |
-| oplacono | `Instant?` | `oplacono DATETIMEOFFSET(3)` NULL | ustawiane przy `OPLACONE`/`WYMAGA_WYJASNIENIA` po płatności |
-| powodWyjasnienia | `String?` | `powod_wyjasnienia NVARCHAR(200)` NULL | np. `NIEWYSTARCZAJACY_STAN`, `NIEZGODNA_KWOTA` |
-| wersja | `long` | `wersja BIGINT` (`@Version`) | |
+| id | `CartId(UUID)` | `id UNIQUEIDENTIFIER` PK | |
+| guestId | `GuestId` | `guest_id UNIQUEIDENTIFIER` | NOT NULL, UNIQUE — one cart per browser |
+| lines | `List<CartLine>` | table `cart_line` | max. 1 line per product |
+| updatedAt | `Instant` | `updated_at DATETIMEOFFSET(3)` | updated on every change (FR-012) |
+| version | `long` | `version BIGINT` (`@Version`) | optimistic locking (two tabs) |
+
+### CartLine (entity within the aggregate)
+
+| Field | Domain type | Column | Rules |
+|---|---|---|---|
+| productId | `long` | `product_id BIGINT` | part of PK `(cart_id, product_id)`; no FK (other BC) |
+| quantity | `int` | `quantity INT` | `1..99` (CHECK) |
+| priceWhenAdded | `Money` | `price_when_added_minor BIGINT` | only for detecting a price change (R-09); never for pricing |
+| addedAt | `Instant` | `added_at DATETIMEOFFSET(3)` | display order |
+
+**Aggregate rules** (R-10, unit tests):
+
+| Operation | Behavior |
+|---|---|
+| `add(product, n)` | `n ∈ 1..99`; existing line → `quantity += n` (FR-007); if the result > `product.maxPurchasable` → `QuantityExceedsLimit(max)` and no change (US2-3, FR-008); product `UNAVAILABLE` → `ProductUnavailable` (US2-4) |
+| `changeQuantity(productId, n)` | `n = 0` → remove the line (US3-4); `n > max` → set `max` and return `QuantityCapped(max)` (US3-3); `n < 0` → error |
+| `remove(productId)` | removes the line; no line → no-op (idempotent) |
+| `clear()` | removes all lines (FR-009, FR-021) |
+| `acceptPrices(prices)` | overwrites `priceWhenAdded` with current prices (R-09) |
+
+### PricedCart (read model, not persisted)
+
+Result of `CartService.price(guestId)` built from `CatalogQueryFacade` data — returned by the API
+and by `CartQueryFacade` to the `order` BC:
+
+| Field | Description |
+|---|---|
+| `lines[]` | `productId, name, imageUrl, unitPrice (current), quantity, lineTotal, status, maxQuantity, priceChanged, previousPrice?, quantityExceedsStock` |
+| `itemCount` | sum of `quantity` over all lines (header counter, FR-013) |
+| `total` | sum of `lineTotal` of available lines (FR-010) |
+| `canPlaceOrder` | non-empty ∧ every line available ∧ `quantity ≤ maxQuantity` (FR-014) |
+| `problems[]` | `PRICE_CHANGED`, `PRODUCT_UNAVAILABLE`, `QUANTITY_EXCEEDS_STOCK` with `productId` |
+
+---
+
+## BC `order`
+
+### Order (aggregate)
+
+| Field | Domain type | Column | Rules |
+|---|---|---|---|
+| id | `OrderId(UUID)` | `id UNIQUEIDENTIFIER` PK | |
+| number | `OrderNumber` | `number VARCHAR(14)` | UNIQUE; `ORD-` + 10 Crockford Base32 characters (R-15) |
+| guestId | `GuestId` | `guest_id UNIQUEIDENTIFIER` | NOT NULL; owner (FR-023); indexed |
+| customer | `CustomerDetails` | columns `email`, `full_name` | see VO |
+| shippingAddress | `ShippingAddress` | `street`, `postal_code`, `city`, `country` | see VO |
+| lines | `List<OrderLine>` | table `order_line` | immutable after creation (FR-017), min. 1 |
+| total | `Money` | `total_minor BIGINT` | = Σ line totals (FR-024), shipping 0 PLN |
+| status | `OrderStatus` | `status VARCHAR(30)` | see the state machine |
+| createdAt | `Instant` | `created_at DATETIMEOFFSET(3)` | |
+| paidAt | `Instant?` | `paid_at DATETIMEOFFSET(3)` NULL | set on `PAID`/`NEEDS_REVIEW` after payment |
+| reviewReason | `String?` | `review_reason NVARCHAR(200)` NULL | e.g. `INSUFFICIENT_STOCK`, `AMOUNT_MISMATCH` |
+| version | `long` | `version BIGINT` (`@Version`) | |
+
+The table is named `orders` (`ORDER` is a reserved word in SQL).
 
 ### Value Objects
 
-| VO | Pola | Niezmienniki (FR-015, R-25) |
+| VO | Fields | Invariants (FR-015, R-25) |
 |---|---|---|
-| `DaneKlienta` | `email`, `imieNazwisko` | email poprawny, ≤ 254; imię i nazwisko 2–100 znaków |
-| `AdresDostawy` | `ulicaINumer`, `kodPocztowy`, `miejscowosc`, `kraj` | ulica 3–120; kod `^\d{2}-\d{3}$`; miejscowość 2–60; `kraj = "PL"` |
-| `NumerZamowienia` | `wartosc` | format `ZAM-[0-9A-HJKMNP-TV-Z]{10}` |
+| `CustomerDetails` | `email`, `fullName` | valid email, ≤ 254; full name 2–100 characters |
+| `ShippingAddress` | `streetAndNumber`, `postalCode`, `city`, `country` | street 3–120; code `^\d{2}-\d{3}$`; city 2–60; `country = "PL"` |
+| `OrderNumber` | `value` | format `ORD-[0-9A-HJKMNP-TV-Z]{10}` |
 
-### PozycjaZamowienia (encja w agregacie, niezmienna)
+### OrderLine (entity within the aggregate, immutable)
 
-| Pole | Kolumna | Reguły |
+| Field | Column | Rules |
 |---|---|---|
-| lp | `lp INT` | część PK `(zamowienie_id, lp)` |
-| produktId | `produkt_id BIGINT` | referencja informacyjna (bez FK) — do zmniejszenia stanu |
-| nazwa | `nazwa NVARCHAR(200)` | kopia z chwili zamówienia |
-| cenaJednostkowa | `cena_jednostkowa_grosze BIGINT` | `> 0` |
-| ilosc | `ilosc INT` | `1..99` |
-| wartosc (wyliczana) | — | `cenaJednostkowa × ilosc` |
+| lineNo | `line_no INT` | part of PK `(order_id, line_no)` |
+| productId | `product_id BIGINT` | informational reference (no FK) — for decreasing stock |
+| name | `name NVARCHAR(200)` | copy at the time of ordering |
+| unitPrice | `unit_price_minor BIGINT` | `> 0` |
+| quantity | `quantity INT` | `1..99` |
+| lineTotal (derived) | — | `unitPrice × quantity` |
 
-### Maszyna stanów `StatusZamowienia`
+### `OrderStatus` state machine
 
 ```text
-                    ┌──────────── PlatnoscPotwierdzona ∧ kwota OK ∧ stan OK ───────────► OPLACONE
+                    ┌──────────── PaymentConfirmed ∧ amount OK ∧ stock OK ──────────► PAID
                     │
-OCZEKUJE_NA_PLATNOSC ─┼──────── PlatnoscPotwierdzona ∧ (brak stanu ∨ zła kwota) ─────► WYMAGA_WYJASNIENIA
+AWAITING_PAYMENT ───┼──────── PaymentConfirmed ∧ (no stock ∨ wrong amount) ─────────► NEEDS_REVIEW
                     │
-                    └──────── PlatnoscNieudana (expired/failed) ∨ Stripe niedostępny ─► PLATNOSC_NIEUDANA
+                    └──────── PaymentFailed (expired/failed) ∨ Stripe unavailable ─► PAYMENT_FAILED
 
-PLATNOSC_NIEUDANA ── PlatnoscPotwierdzona (spóźniona) ──► WYMAGA_WYJASNIENIA
-OPLACONE, WYMAGA_WYJASNIENIA — stany końcowe w PoC
+PAYMENT_FAILED ── PaymentConfirmed (late) ──► NEEDS_REVIEW
+PAID, NEEDS_REVIEW — final states in the PoC
 ```
 
-| Z → Do | Wyzwalacz | Efekty w tej samej transakcji |
+| From → To | Trigger | Effects in the same transaction |
 |---|---|---|
-| `OCZEKUJE…` → `OPLACONE` | zdarzenie potwierdzenia, `amount_total == suma`, `currency == pln`, stan wystarczający | `oplacono = now`; `KatalogCommandFacade.zmniejszStan`; `KoszykCommandFacade.wyczysc(goscId)`; `OutboxEvent(ZamowienieOplacone)` (FR-021, R-17) |
-| `OCZEKUJE…` → `WYMAGA_WYJASNIENIA` | potwierdzenie, ale stan niewystarczający lub niezgodna kwota | `oplacono = now`; `powodWyjasnienia`; koszyk czyszczony; stan **nie** zmieniany |
-| `OCZEKUJE…` → `PLATNOSC_NIEUDANA` | `checkout.session.expired` / `async_payment_failed` / błąd tworzenia sesji | koszyk **nie** zmieniany (FR-022) |
-| `PLATNOSC_NIEUDANA` → `WYMAGA_WYJASNIENIA` | spóźnione potwierdzenie płatności | `powodWyjasnienia = POTWIERDZENIE_PO_NIEPOWODZENIU` |
-| `OPLACONE` → `OPLACONE` | powtórzone potwierdzenie (inny `event.id`, ta sama sesja) | brak efektów — idempotencja domenowa (FR-020) |
-| inne | — | `NiedozwolonePrzejscieStatusu` (test jednostkowy) |
+| `AWAITING…` → `PAID` | confirmation event, `amount_total == total`, `currency == pln`, sufficient stock | `paidAt = now`; `CatalogCommandFacade.decreaseStock`; `CartCommandFacade.clear(guestId)`; `OutboxEvent(OrderPaid)` (FR-021, R-17) |
+| `AWAITING…` → `NEEDS_REVIEW` | confirmation, but insufficient stock or amount mismatch | `paidAt = now`; `reviewReason`; cart cleared; stock **not** changed |
+| `AWAITING…` → `PAYMENT_FAILED` | `checkout.session.expired` / `async_payment_failed` / session creation error | cart **not** changed (FR-022) |
+| `PAYMENT_FAILED` → `NEEDS_REVIEW` | late payment confirmation | `reviewReason = CONFIRMED_AFTER_FAILURE` |
+| `PAID` → `PAID` | repeated confirmation (different `event.id`, same session) | no effects — domain idempotency (FR-020) |
+| other | — | `IllegalStatusTransition` (unit test) |
 
-Mapowanie statusu na etykietę UI (frontend, tylko prezentacja): `OCZEKUJE_NA_PLATNOSC` →
-„Płatność w trakcie weryfikacji" (strona potwierdzenia, US4-6) / „Oczekuje na płatność";
-`OPLACONE` → „Opłacone"; `PLATNOSC_NIEUDANA` → „Płatność nieudana";
-`WYMAGA_WYJASNIENIA` → „Wymaga wyjaśnienia".
+Mapping of status to UI label (frontend, presentation only; exact Polish copy in the translation
+files): `AWAITING_PAYMENT` → "Payment being verified" (confirmation page, US4-6) / "Awaiting
+payment"; `PAID` → "Paid"; `PAYMENT_FAILED` → "Payment failed"; `NEEDS_REVIEW` → "Needs review".
 
-### Zdarzenie `ZamowienieOplaconeEvent` (ładunek Outbox)
+### Event `OrderPaidEvent` (Outbox payload)
 
-`numer`, `oplacono`, `suma{grosze, waluta}`, `pozycje[{nazwa, ilosc, cenaJednostkowaGrosze}]`,
-`klient{imieNazwisko}`, `adres{…}`. Bez e-maila (minimalizacja danych dla Trello — dołączany
-tylko, jeśli funkcja `realizacja` uzasadni potrzebę).
+`number`, `paidAt`, `total{minor, currency}`, `lines[{name, quantity, unitPriceMinor}]`,
+`customer{fullName}`, `shippingAddress{…}`. No email (data minimization for Trello — added only if
+the `fulfillment` feature justifies the need).
 
 ---
 
-## BC `platnosc`
+## BC `payment`
 
-### Platnosc (agregat)
+### Payment (aggregate)
 
-| Pole | Typ domenowy | Kolumna | Reguły |
+| Field | Domain type | Column | Rules |
 |---|---|---|---|
-| id | `PlatnoscId(UUID)` | `id UNIQUEIDENTIFIER` PK | używany w kluczu idempotencji (R-11) |
-| zamowienieId | `UUID` | `zamowienie_id UNIQUEIDENTIFIER` | NOT NULL; indeks; bez FK (inny BC) |
-| goscId | `GoscId` | `gosc_id UNIQUEIDENTIFIER` | do wygaszania poprzednich sesji gościa (R-13) |
-| kwota | `Pieniadze` | `kwota_grosze BIGINT` | = suma zamówienia |
-| operatorSesjaId | `String?` | `stripe_session_id VARCHAR(255)` | UNIQUE (filtrowany, NOT NULL) |
-| operatorPlatnoscId | `String?` | `stripe_payment_intent_id VARCHAR(255)` NULL | z webhooka |
-| urlPlatnosci | `String?` | `url_platnosci NVARCHAR(1000)` NULL | |
-| status | `StatusPlatnosci` | `status VARCHAR(20)` | `UTWORZONA → OTWARTA → POTWIERDZONA \| NIEUDANA \| WYGASZONA` |
-| utworzono / potwierdzono | `Instant` | `DATETIMEOFFSET(3)` | `potwierdzono` NULL do potwierdzenia |
+| id | `PaymentId(UUID)` | `id UNIQUEIDENTIFIER` PK | used in the idempotency key (R-11) |
+| orderId | `UUID` | `order_id UNIQUEIDENTIFIER` | NOT NULL; indexed; no FK (other BC) |
+| guestId | `GuestId` | `guest_id UNIQUEIDENTIFIER` | for expiring the guest's previous sessions (R-13) |
+| amount | `Money` | `amount_minor BIGINT` | = order total |
+| providerSessionId | `String?` | `stripe_session_id VARCHAR(255)` | UNIQUE (filtered, NOT NULL) |
+| providerPaymentId | `String?` | `stripe_payment_intent_id VARCHAR(255)` NULL | from the webhook |
+| paymentUrl | `String?` | `payment_url NVARCHAR(1000)` NULL | |
+| status | `PaymentStatus` | `status VARCHAR(20)` | `CREATED → OPEN → CONFIRMED \| FAILED \| EXPIRED` |
+| createdAt / confirmedAt | `Instant` | `DATETIMEOFFSET(3)` | `confirmed_at` NULL until confirmed |
 
-Przejścia: `UTWORZONA → OTWARTA` (sesja utworzona), `UTWORZONA → NIEUDANA` (Stripe
-niedostępny), `OTWARTA → POTWIERDZONA` (webhook completed/paid), `OTWARTA → WYGASZONA`
-(webhook expired lub nasze `expire` przy ponownej próbie), `OTWARTA → NIEUDANA`
-(async_payment_failed). `POTWIERDZONA` jest końcowa.
+Transitions: `CREATED → OPEN` (session created), `CREATED → FAILED` (Stripe unavailable),
+`OPEN → CONFIRMED` (webhook completed/paid), `OPEN → EXPIRED` (webhook expired or our `expire` on a
+retry), `OPEN → FAILED` (async_payment_failed). `CONFIRMED` is final.
 
-### Tabela `przetworzone_zdarzenie_stripe`
+### Table `processed_stripe_event`
 
-| Kolumna | Typ | Ograniczenia |
+| Column | Type | Constraints |
 |---|---|---|
-| `event_id` | `VARCHAR(255)` | PK — deduplikacja (R-12, FR-020) |
-| `typ` | `VARCHAR(100)` | NOT NULL |
-| `przetworzono` | `DATETIMEOFFSET(3)` | NOT NULL |
+| `event_id` | `VARCHAR(255)` | PK — deduplication (R-12, FR-020) |
+| `type` | `VARCHAR(100)` | NOT NULL |
+| `processed_at` | `DATETIMEOFFSET(3)` | NOT NULL |
 
-### Port domenowy `BramkaPlatnosci` (Zasada V)
+### Domain port `PaymentGateway` (Principle V)
 
-| Operacja | Wejście | Wyjście |
+| Operation | Input | Output |
 |---|---|---|
-| `utworzSesje` | `platnoscId`, `numerZamowienia`, pozycje (nazwa, cena, ilość), email, URL-e powrotu | `SesjaPlatnosci{operatorSesjaId, url}` lub `BramkaNiedostepna` |
-| `wygas` | `operatorSesjaId` | `WYGASZONA` / `JUZ_OPLACONA` |
+| `createSession` | `paymentId`, `orderNumber`, lines (name, price, quantity), email, return URLs | `PaymentSession{providerSessionId, url}` or `GatewayUnavailable` |
+| `expire` | `providerSessionId` | `EXPIRED` / `ALREADY_PAID` |
 
-Weryfikacja podpisu webhooka jest w adapterze `infrastructure/stripe` i produkuje
-niezależny od SDK `PotwierdzenieOperatora{eventId, typ, sesjaId, paymentIntentId, kwota, waluta, oplacona}`.
+Webhook signature verification lives in the `infrastructure/stripe` adapter and produces an
+SDK-independent `ProviderConfirmation{eventId, type, sessionId, paymentIntentId, amount, currency, paid}`.
 
-### Zdarzenia publikowane przez `platnosc` (publiczne rekordy w pakiecie głównym BC)
+### Events published by `payment` (public records in the BC's root package)
 
-| Zdarzenie | Pola | Konsument |
+| Event | Fields | Consumer |
 |---|---|---|
-| `PlatnoscPotwierdzonaEvent` | `zamowienieId, kwotaGrosze, waluta, potwierdzono` | `zamowienie` (synchronicznie, ta sama transakcja — R-02) |
-| `PlatnoscNieudanaEvent` | `zamowienieId, powod` | `zamowienie` |
+| `PaymentConfirmedEvent` | `orderId, amountMinor, currency, confirmedAt` | `order` (synchronously, same transaction — R-02) |
+| `PaymentFailedEvent` | `orderId, reason` | `order` |
 
 ---
 
-## Fasady (publiczne API BC)
+## Facades (public BC API)
 
-| Fasada | Operacje | Konsumenci |
+| Facade | Operations | Consumers |
 |---|---|---|
-| `KatalogQueryFacade` | `pobierzDoWyceny(Set<Long> ids) → Map<Long, ProduktDoWycenyDto>` | `koszyk`, `zamowienie` |
-| `KatalogCommandFacade` | `zmniejszStan(List<PozycjaStanuDto>) → WynikZmniejszeniaStanu` | `zamowienie` |
-| `KoszykQueryFacade` | `wycen(GoscId) → WycenionyKoszykDto` | `zamowienie` |
-| `KoszykCommandFacade` | `wyczysc(GoscId)` | `zamowienie` |
-| `PlatnoscFacade` | `rozpocznij(RozpocznijPlatnoscDto) → RozpoczetaPlatnoscDto`, `wygasOtwarte(GoscId) → WynikWygaszenia` | `zamowienie` |
-| `ZamowienieQueryFacade` | `pobierz(NumerZamowienia, GoscId) → Optional<ZamowienieDto>` | (przyszła funkcja `realizacja`) |
+| `CatalogQueryFacade` | `getForPricing(Set<Long> ids) → Map<Long, PricingProductDto>` | `cart`, `order` |
+| `CatalogCommandFacade` | `decreaseStock(List<StockLineDto>) → StockDecreaseResult` | `order` |
+| `CartQueryFacade` | `price(GuestId) → PricedCartDto` | `order` |
+| `CartCommandFacade` | `clear(GuestId)` | `order` |
+| `PaymentFacade` | `start(StartPaymentDto) → StartedPaymentDto`, `expireOpen(GuestId) → ExpiryResult` | `order` |
+| `OrderQueryFacade` | `get(OrderNumber, GuestId) → Optional<OrderDto>` | (future `fulfillment` feature) |
 
-Kontrolery REST korzystają z `*Service` własnego BC, nie z fasad innych BC.
+REST controllers use their own BC's `*Service`, not other BCs' facades.
 
 ---
 
-## Obserwowalność (US5, R-26–R-34)
+## Observability (US5, R-26–R-34)
 
-Obserwowalność **nie dodaje tabel ani kolumn** i nie zmienia encji domenowych. Dodaje porty
-metryk w warstwie `application/` (R-27) — jedyną drogę, którą serwisy aplikacyjne zgłaszają
-zdarzenia biznesowe. Pełny katalog nazw i etykiet: [contracts/metrics.md](contracts/metrics.md).
+Observability **adds no tables or columns** and does not change domain entities. It adds metrics
+ports in the `application/` layer (R-27) — the only way application services report business
+events. Full catalog of names and labels: [contracts/metrics.md](contracts/metrics.md).
 
-### Porty metryk (`public interface` w `<bc>/application/`, adapter package-private w `<bc>/infrastructure/metrics/`)
+### Metrics ports (`public interface` in `<bc>/application/`, package-private adapter in `<bc>/infrastructure/metrics/`)
 
-| Port | Operacje | Wołany przez | Zapis |
+| Port | Operations | Called by | Recorded |
 |---|---|---|---|
-| `MetrykiKoszyka` | `dodanoDoKoszyka()` | `KoszykService` po udanym dodaniu | po commicie |
-| `MetrykiZamowien` | `zamowienieUtworzone()`; `rozbieznoscPodsumowania(Set<RodzajRozbieznosci>)`; `zamowienieZakonczone(StatusZamowienia docelowy, Pieniadze suma, Duration czasDoOplacenia)` | `ZlozZamowienieService` (TX1; przy `409`), `ObslugaPlatnosciListener` (przejście statusu) | po commicie (`409` — natychmiast, bez transakcji) |
-| `MetrykiPlatnosci` | `webhook(WynikWebhooka)`; `platnosc(WynikPlatnosci)`; `opoznieniePotwierdzenia(Duration)` | `ObslugaWebhookaService` — wszystkie wyniki, także odrzucenie podpisu/`livemode` zwrócone przez `StripeWebhookVerifier` | po commicie; odrzucenia — natychmiast |
+| `CartMetrics` | `addedToCart()` | `CartService` after a successful add | after commit |
+| `OrderMetrics` | `orderCreated()`; `summaryMismatch(Set<MismatchKind>)`; `orderCompleted(OrderStatus target, Money total, Duration timeToPayment)` | `PlaceOrderService` (TX1; on `409`), `PaymentEventsListener` (status transition) | after commit (`409` — immediately, no transaction) |
+| `PaymentMetrics` | `webhook(WebhookOutcome)`; `payment(PaymentOutcome)`; `confirmationDelay(Duration)` | `WebhookHandlingService` — all outcomes, including signature/`livemode` rejections returned by `StripeWebhookVerifier` | after commit; rejections — immediately |
 
-Metryki wywołań Stripe (`shop.stripe.*`) rejestruje adapter `StripeBramkaPlatnosci` bezpośrednio
-(`MeterRegistry` w `infrastructure/`), gauge'e Outboxa — `shared/infrastructure/metrics/OutboxMetryki`,
-migracji — `shared/infrastructure/metrics/FlywayMetryki`. Helper `shared/infrastructure/metrics/PoCommicie`
-odkłada zapis do `afterCommit` (albo wykonuje natychmiast bez aktywnej transakcji).
+Stripe call metrics (`shop.stripe.*`) are recorded directly by the `StripePaymentGateway` adapter
+(`MeterRegistry` in `infrastructure/`), Outbox gauges by `shared/infrastructure/metrics/OutboxMetrics`,
+migrations by `shared/infrastructure/metrics/FlywayMetrics`. The helper
+`shared/infrastructure/metrics/AfterCommit` defers recording to `afterCommit` (or runs immediately
+when there is no active transaction).
 
-`zamowienieZakonczone` liczy **przejścia** do statusu docelowego: spóźnione potwierdzenie
-(`PLATNOSC_NIEUDANA → WYMAGA_WYJASNIENIA`) zwiększa licznik `WYMAGA_WYJASNIENIA`, a wcześniejszy
-`PLATNOSC_NIEUDANA` pozostaje policzony. Powtórzone potwierdzenie `OPLACONE → OPLACONE` nie
-jest przejściem — licznik się nie zmienia (FR-020).
+`orderCompleted` counts **transitions** to the target status: a late confirmation
+(`PAYMENT_FAILED → NEEDS_REVIEW`) increments the `NEEDS_REVIEW` counter, while the earlier
+`PAYMENT_FAILED` stays counted. A repeated confirmation `PAID → PAID` is not a transition — the
+counter does not change (FR-020).
 
-### Enumy etykiet (jedyne dopuszczalne wartości — FR-031)
+### Label enums (the only allowed values — FR-031)
 
-| Enum | Pakiet | Wartości → etykieta |
+| Enum | Package | Values → label |
 |---|---|---|
-| `StatusZamowienia` (istniejący) | `zamowienie/domain` | tylko stany docelowe: `OPLACONE`, `PLATNOSC_NIEUDANA`, `WYMAGA_WYJASNIENIA` → `status` |
-| `RodzajRozbieznosci` | `zamowienie/application` | `CENA`, `DOSTEPNOSC`, `SKLAD` → `rodzaj` |
-| `WynikWebhooka` | `platnosc/application` | `PRZETWORZONE`, `ZDUPLIKOWANE`, `ODRZUCONY_PODPIS`, `ODRZUCONY_LIVEMODE`, `ZIGNOROWANE` → `wynik` (małe litery) |
-| `WynikPlatnosci` | `platnosc/application` | `UDANA`, `ODRZUCONA`, `ANULOWANA` → `wynik` (małe litery) |
-| `OperacjaStripe`, `WynikWywolania` | `platnosc/infrastructure/stripe` | `UTWORZ_SESJE`, `WYGAS_SESJE`; `SUKCES`, `BLAD`, `TIMEOUT` → `operacja`, `wynik` |
+| `OrderStatus` (existing) | `order/domain` | target states only: `PAID`, `PAYMENT_FAILED`, `NEEDS_REVIEW` → `status` |
+| `MismatchKind` | `order/application` | `PRICE`, `AVAILABILITY`, `CONTENTS` → `kind` |
+| `WebhookOutcome` | `payment/application` | `PROCESSED`, `DUPLICATE`, `REJECTED_SIGNATURE`, `REJECTED_LIVEMODE`, `IGNORED` → `outcome` (lower case) |
+| `PaymentOutcome` | `payment/application` | `SUCCEEDED`, `DECLINED`, `CANCELED` → `outcome` (lower case) |
+| `StripeOperation`, `CallOutcome` | `payment/infrastructure/stripe` | `CREATE_SESSION`, `EXPIRE_SESSION`; `SUCCESS`, `ERROR`, `TIMEOUT` → `operation`, `outcome` |
 
-`RodzajRozbieznosci` wylicza `ZlozZamowienieService` przy porównaniu potwierdzonego
-podsumowania z nową wyceną (R-14): inna cena jednostkowa → `CENA`; pozycja niedostępna lub
-ilość > stan → `DOSTEPNOSC`; inny zbiór produktów lub ilości → `SKLAD`.
+`MismatchKind` is computed by `PlaceOrderService` when comparing the confirmed summary with a fresh
+pricing (R-14): a different unit price → `PRICE`; an unavailable line or quantity > stock →
+`AVAILABILITY`; a different set of products or quantities → `CONTENTS`.
 
-### Zapytania dla gauge'y
+### Gauge queries
 
-| Gauge | Zapytanie | Indeks | Odświeżanie |
+| Gauge | Query | Index | Refresh |
 |---|---|---|---|
-| `shop.outbox.oczekujace`, `shop.outbox.najstarsze` | `SELECT COUNT(*), MIN(utworzono) FROM outbox_event WHERE wyslano IS NULL` | istniejący `(wyslano, utworzono)` | wynik buforowany 15 s |
-| `shop.flyway.migracje{stan}` | `Flyway.info().all()` pogrupowane po stanie | — | raz, po `ApplicationReadyEvent` |
+| `shop.outbox.pending`, `shop.outbox.oldest` | `SELECT COUNT(*), MIN(created_at) FROM outbox_event WHERE sent_at IS NULL` | existing `(sent_at, created_at)` | result cached for 15 s |
+| `shop.flyway.migrations{state}` | `Flyway.info().all()` grouped by state | — | once, after `ApplicationReadyEvent` |
