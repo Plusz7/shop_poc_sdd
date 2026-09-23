@@ -1,0 +1,126 @@
+.title {
+  margin: 0 0 12px;
+  font-size: 1.5rem;
+}
+
+.filters {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.categories {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0 0 4px;
+  list-style: none;
+  overflow-x: auto;
+}
+
+.category {
+  display: inline-block;
+  padding: 6px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  background: #fff;
+  color: #111827;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.categoryCurrent {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.filterRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.priceRange {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.priceRange label,
+.sort {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.875rem;
+}
+
+.priceRange input {
+  width: 110px;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+}
+
+.priceRange button,
+.primaryButton {
+  min-height: 40px;
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 6px;
+  background: #1d4ed8;
+  color: #fff;
+  cursor: pointer;
+}
+
+.sort select {
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.fieldError {
+  flex-basis: 100%;
+  margin: 0;
+  color: #b91c1c;
+  font-size: 0.875rem;
+}
+
+.count {
+  margin: 0 0 8px;
+  color: #4b5563;
+  font-size: 0.875rem;
+}
+
+/* 2 columns on phones, 3 on tablets, 4 on desktop */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 768px) {
+  .grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.empty {
+  padding: 32px 16px;
+  text-align: center;
+}

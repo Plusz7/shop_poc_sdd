@@ -1,0 +1,23 @@
+.label {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.AVAILABLE {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.LOW_STOCK {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.UNAVAILABLE {
+  background: #e5e7eb;
+  color: #374151;
+}
