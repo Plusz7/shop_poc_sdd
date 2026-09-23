@@ -142,6 +142,47 @@ i stan koszyka w obu przypadkach.
 
 ---
 
+### User Story 5 - Monitorowanie działania sklepu (Priority: P2)
+
+Zespół utrzymujący sklep (developer/operator) otwiera gotowe dashboardy w Grafanie i widzi,
+czy sklep działa poprawnie: ruch, czasy odpowiedzi i błędy, przebieg zakupów (koszyki,
+zamówienia, płatności udane i nieudane), stan integracji z operatorem płatności oraz stan
+aplikacji i bazy danych. Gdy dzieje się coś niepokojącego (rosnąca liczba błędów, wolne
+odpowiedzi, niedziałające potwierdzenia płatności), odpowiednia reguła alertu przechodzi
+w stan „firing" bez konieczności ciągłego wpatrywania się w wykresy.
+
+**Why this priority**: sklep bez obserwowalności działa „w ciemno" — nie da się wykazać
+spełnienia SC-003 i SC-007 ani szybko zdiagnozować problemu z płatnościami. Nie blokuje
+jednak samej ścieżki zakupowej, dlatego P2.
+
+**Independent Test**: po `docker compose up` i wykonaniu kilku zakupów testowych (udanego
+i odrzuconego) otworzyć Grafanę i sprawdzić, że dashboardy pokazują ruch, zamówienia
+i płatności zgodne z wykonanymi akcjami; wyłączyć bazę danych lub wysłać sfałszowane
+potwierdzenie płatności i sprawdzić, że odpowiedni alert zmienia stan.
+
+**Acceptance Scenarios**:
+
+1. **Given** środowisko lokalne zostało uruchomione jednym poleceniem, **When** developer
+   otwiera Grafanę, **Then** źródło danych Prometheus i dashboardy sklepu są już skonfigurowane,
+   bez ręcznego klikania.
+2. **Given** klient wykonał zakup, **When** developer patrzy na dashboard biznesowy, **Then**
+   w ciągu 1 minuty widzi wzrost liczby utworzonych i opłaconych zamówień oraz wartości
+   opłaconych zamówień w PLN.
+3. **Given** płatność została odrzucona, **When** developer patrzy na dashboard płatności,
+   **Then** widzi ją jako płatność nieudaną, odróżnioną od udanych i anulowanych.
+4. **Given** sklep otrzymał potwierdzenie płatności z niepoprawnym podpisem, **When** developer
+   patrzy na dashboard płatności, **Then** widzi licznik odrzuconych potwierdzeń, a reguła
+   alertu dotycząca sfałszowanych potwierdzeń przechodzi w stan „firing".
+5. **Given** odsetek błędów serwera przekracza próg przez zadany czas, **When** reguła jest
+   ewaluowana, **Then** alert „wysoki odsetek błędów" przechodzi w stan „firing" i wraca do
+   „resolved" po ustąpieniu problemu.
+6. **Given** operator płatności jest niedostępny, **When** developer patrzy na dashboard
+   integracji, **Then** widzi rosnącą liczbę błędów i przekroczeń czasu wywołań operatora.
+7. **Given** endpoint metryk aplikacji, **When** ktoś spoza sieci wewnętrznej próbuje go
+   odczytać, **Then** dostęp jest niemożliwy (metryki nie są wystawione publicznie).
+
+---
+
 ### Edge Cases
 
 - Dwóch klientów jednocześnie kupuje ostatnią sztukę produktu: dostępność jest sprawdzana przy
@@ -164,6 +205,13 @@ i stan koszyka w obu przypadkach.
   (jak w US3, scenariusz 7).
 - Bardzo długa fraza wyszukiwania lub znaki specjalne: wyszukiwanie działa bez błędu
   (fraza przycinana do 100 znaków).
+- Prometheus lub Grafana są niedostępne: sklep działa normalnie — zbieranie metryk nigdy nie
+  blokuje ani nie spowalnia ścieżki zakupowej; po powrocie Prometheusa zbieranie wznawia się
+  samo (luka w danych jest akceptowalna).
+- Restart aplikacji zeruje liczniki w pamięci: dashboardy i alerty opierają się na tempie
+  zmian (`rate`/`increase`), więc restart nie powoduje fałszywych skoków ani alertów.
+- Wyszukiwanie z dowolną frazą lub wejście na nieistniejący adres: metryki nie tworzą osobnej
+  serii dla każdej frazy/adresu — etykiety mają ograniczony, z góry znany zbiór wartości.
 
 ## Requirements *(mandatory)*
 
@@ -225,6 +273,47 @@ i stan koszyka w obu przypadkach.
 - **FR-024**: Wszystkie kwoty MUSZĄ być prezentowane w PLN z dokładnością do 1 grosza, a suma
   zamówienia MUSI być równa sumie wartości pozycji (koszt dostawy w PoC wynosi 0 zł).
 
+**Obserwowalność (metryki, dashboardy, alerty)**
+
+- **FR-025**: System MUST wystawiać metryki w formacie Prometheus na endpoincie dostępnym
+  wyłącznie wewnętrznie (osobny port zarządzania lub sieć kontenerów), niedostępnym dla klientów
+  sklepu.
+- **FR-026**: System MUST mierzyć dla każdego endpointu HTTP (po szablonie ścieżki, nie
+  konkretnym adresie): liczbę żądań, status odpowiedzi i rozkład czasu odpowiedzi (histogram
+  pozwalający wyliczyć p50/p95/p99).
+- **FR-027**: System MUST udostępniać metryki biznesowe ścieżki zakupowej: dodania do koszyka,
+  rozpoczęte zamówienia, zamówienia wg statusu docelowego („Opłacone", „Płatność nieudana",
+  „Wymaga wyjaśnienia"), płatności wg wyniku (udana/odrzucona/anulowana), łączną wartość
+  opłaconych zamówień w PLN oraz liczbę przypadków rozbieżności cen/dostępności przy
+  przejściu do płatności (FR-016).
+- **FR-028**: System MUST udostępniać metryki integracji z operatorem płatności: czas i wynik
+  każdego wywołania (sukces/błąd/timeout), liczbę ponowień, liczbę otrzymanych potwierdzeń
+  z podziałem na przetworzone, zduplikowane (FR-020) i odrzucone z powodu niepoprawnego podpisu
+  (edge case „sfałszowane potwierdzenie") oraz czas od utworzenia zamówienia do jego opłacenia.
+- **FR-029**: System MUST udostępniać metryki Outboxa: liczbę zdarzeń oczekujących na wysyłkę
+  i wiek najstarszego z nich.
+- **FR-030**: System MUST udostępniać metryki techniczne: JVM (pamięć, GC, wątki), pula połączeń
+  do bazy (aktywne, oczekujące, czas pozyskania), migracje bazy oraz stan zdrowia aplikacji
+  (liveness/readiness).
+- **FR-031**: Metryki NIE MOGĄ zawierać danych osobowych ani sekretów (e-mail, imię i nazwisko,
+  adres, identyfikatory zamówień/płatności, klucze) w nazwach ani etykietach; wszystkie etykiety
+  MUSZĄ mieć ograniczony, z góry znany zbiór wartości. Każda metryka MUSI mieć etykietę
+  `application` identyfikującą sklep.
+- **FR-032**: Środowisko lokalne MUST uruchamiać Prometheus i Grafanę razem ze sklepem jednym
+  poleceniem; źródło danych, dashboardy i reguły alertów MUSZĄ być wersjonowane w repozytorium
+  i ładowane automatycznie (provisioning), bez ręcznej konfiguracji.
+- **FR-033**: System MUST dostarczać co najmniej dashboardy: (a) przegląd HTTP — ruch, błędy,
+  opóźnienia p95/p99 per endpoint; (b) ścieżka zakupowa — lejek koszyk → zamówienie → opłacone,
+  płatności wg wyniku, wartość sprzedaży; (c) płatności i integracje — wywołania operatora,
+  potwierdzenia wg wyniku, czas do opłacenia, Outbox; (d) JVM i baza danych.
+- **FR-034**: System MUST definiować reguły alertów co najmniej dla: odsetka odpowiedzi 5xx
+  > 5% przez 5 minut; p95 czasu odpowiedzi listy produktów, wyszukiwania lub koszyka > 1 s przez
+  5 minut (SC-003); jakiegokolwiek potwierdzenia płatności odrzuconego z powodu podpisu;
+  odsetka błędów/timeoutów wywołań operatora płatności > 20% przez 5 minut; zamówienia
+  „Oczekuje na płatność" z udaną płatnością dłużej niż 30 s (SC-007); pojawienia się zamówienia
+  „Wymaga wyjaśnienia"; najstarszego zdarzenia w Outboxie starszego niż 5 minut; niedostępności
+  aplikacji (brak odczytu metryk przez 1 minutę).
+
 ### Key Entities *(include if feature involves data)*
 
 - **Produkt**: oferowany towar — nazwa, opis, cena (PLN), zdjęcia, kategoria, stan magazynowy,
@@ -259,6 +348,16 @@ i stan koszyka w obu przypadkach.
   płatności przez operatora.
 - **SC-008**: Wszystkie cztery ścieżki (przeglądanie, dodanie do koszyka, edycja koszyka,
   płatność) można zademonstrować end-to-end na środowisku lokalnym.
+- **SC-009**: Po uruchomieniu środowiska lokalnego jednym poleceniem wszystkie dashboardy
+  z FR-033 są dostępne w Grafanie i pokazują dane w ciągu 2 minut, bez ręcznej konfiguracji.
+- **SC-010**: Każde zdarzenie ścieżki zakupowej wykonane w teście (dodanie do koszyka,
+  zamówienie, płatność udana/odrzucona, sfałszowane potwierdzenie) jest widoczne w metrykach
+  w ciągu 1 minuty, a liczby zgadzają się z wykonanymi akcjami w 100% przypadków testowych.
+- **SC-011**: Każda reguła alertu z FR-034 została co najmniej raz wywołana w teście (stan
+  „firing") i wróciła do „resolved" po ustąpieniu przyczyny.
+- **SC-012**: 0 wystąpień danych osobowych lub sekretów w odpowiedzi endpointu metryk
+  (weryfikowane testem automatycznym po wykonaniu pełnej ścieżki zakupowej); narzut zbierania
+  metryk na czas odpowiedzi p95 poniżej 5%.
 
 ## Assumptions
 
@@ -277,3 +376,13 @@ i stan koszyka w obu przypadkach.
 - Interfejs jest w języku polskim i działa na przeglądarkach desktopowych i mobilnych.
 - Wzorcem zachowań (koszyk, licznik, komunikaty o dostępności) są popularne marketplace'y
   (Allegro, eBay) w zakresie opisanym powyżej.
+- Obserwowalność opiera się na Prometheusie (zbieranie metryk metodą pull, retencja 15 dni
+  lokalnie) i Grafanie (dashboardy); obie usługi działają jako kontenery w środowisku lokalnym
+  obok sklepu. Jest to świadomie dodany komponent na wyraźne życzenie właściciela projektu.
+- Alerty są definiowane i widoczne (Prometheus/Grafana), ale wysyłka powiadomień (e-mail, Slack,
+  Alertmanager z routingiem) jest poza zakresem PoC.
+- Metryki frontendu (Web Vitals, błędy JS), centralne zbieranie logów (np. Loki) i śledzenie
+  rozproszone (np. Tempo) są poza zakresem — możliwe rozszerzenie. Logi aplikacji zawierają
+  identyfikator korelacji żądania, by dało się je powiązać z incydentem widocznym na dashboardzie.
+- Dostęp do Grafany w środowisku lokalnym chroni hasło administratora podawane przez zmienną
+  środowiskową (nie domyślne `admin/admin`).
