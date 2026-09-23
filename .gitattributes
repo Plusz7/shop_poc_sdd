@@ -1,2 +1,4 @@
 # Shell scripts must keep LF endings, or bash fails on CRLF
 *.sh text eol=lf
+# Maven wrapper is a shell script without the .sh extension
+mvnw text eol=lf

@@ -1,0 +1,8 @@
+# osv-scanner configuration (CI dependency audit, T010).
+# The build fails on findings with CVSS >= 7.0. Exceptions are allowed ONLY here and ONLY with
+# a justification, using this format:
+#
+# [[IgnoredVulns]]
+# id = "GHSA-xxxx-xxxx-xxxx"           # vulnerability identifier
+# ignoreUntil = 2026-12-31             # optional review date
+# reason = "Why it does not apply to this project (e.g. vulnerable code path not used)"
