@@ -268,3 +268,50 @@ niezależny od SDK `PotwierdzenieOperatora{eventId, typ, sesjaId, paymentIntentI
 | `ZamowienieQueryFacade` | `pobierz(NumerZamowienia, GoscId) → Optional<ZamowienieDto>` | (przyszła funkcja `realizacja`) |
 
 Kontrolery REST korzystają z `*Service` własnego BC, nie z fasad innych BC.
+
+---
+
+## Obserwowalność (US5, R-26–R-34)
+
+Obserwowalność **nie dodaje tabel ani kolumn** i nie zmienia encji domenowych. Dodaje porty
+metryk w warstwie `application/` (R-27) — jedyną drogę, którą serwisy aplikacyjne zgłaszają
+zdarzenia biznesowe. Pełny katalog nazw i etykiet: [contracts/metrics.md](contracts/metrics.md).
+
+### Porty metryk (`public interface` w `<bc>/application/`, adapter package-private w `<bc>/infrastructure/metrics/`)
+
+| Port | Operacje | Wołany przez | Zapis |
+|---|---|---|---|
+| `MetrykiKoszyka` | `dodanoDoKoszyka()` | `KoszykService` po udanym dodaniu | po commicie |
+| `MetrykiZamowien` | `zamowienieUtworzone()`; `rozbieznoscPodsumowania(Set<RodzajRozbieznosci>)`; `zamowienieZakonczone(StatusZamowienia docelowy, Pieniadze suma, Duration czasDoOplacenia)` | `ZlozZamowienieService` (TX1; przy `409`), `ObslugaPlatnosciListener` (przejście statusu) | po commicie (`409` — natychmiast, bez transakcji) |
+| `MetrykiPlatnosci` | `webhook(WynikWebhooka)`; `platnosc(WynikPlatnosci)`; `opoznieniePotwierdzenia(Duration)` | `ObslugaWebhookaService` — wszystkie wyniki, także odrzucenie podpisu/`livemode` zwrócone przez `StripeWebhookVerifier` | po commicie; odrzucenia — natychmiast |
+
+Metryki wywołań Stripe (`shop.stripe.*`) rejestruje adapter `StripeBramkaPlatnosci` bezpośrednio
+(`MeterRegistry` w `infrastructure/`), gauge'e Outboxa — `shared/infrastructure/metrics/OutboxMetryki`,
+migracji — `shared/infrastructure/metrics/FlywayMetryki`. Helper `shared/infrastructure/metrics/PoCommicie`
+odkłada zapis do `afterCommit` (albo wykonuje natychmiast bez aktywnej transakcji).
+
+`zamowienieZakonczone` liczy **przejścia** do statusu docelowego: spóźnione potwierdzenie
+(`PLATNOSC_NIEUDANA → WYMAGA_WYJASNIENIA`) zwiększa licznik `WYMAGA_WYJASNIENIA`, a wcześniejszy
+`PLATNOSC_NIEUDANA` pozostaje policzony. Powtórzone potwierdzenie `OPLACONE → OPLACONE` nie
+jest przejściem — licznik się nie zmienia (FR-020).
+
+### Enumy etykiet (jedyne dopuszczalne wartości — FR-031)
+
+| Enum | Pakiet | Wartości → etykieta |
+|---|---|---|
+| `StatusZamowienia` (istniejący) | `zamowienie/domain` | tylko stany docelowe: `OPLACONE`, `PLATNOSC_NIEUDANA`, `WYMAGA_WYJASNIENIA` → `status` |
+| `RodzajRozbieznosci` | `zamowienie/application` | `CENA`, `DOSTEPNOSC`, `SKLAD` → `rodzaj` |
+| `WynikWebhooka` | `platnosc/application` | `PRZETWORZONE`, `ZDUPLIKOWANE`, `ODRZUCONY_PODPIS`, `ODRZUCONY_LIVEMODE`, `ZIGNOROWANE` → `wynik` (małe litery) |
+| `WynikPlatnosci` | `platnosc/application` | `UDANA`, `ODRZUCONA`, `ANULOWANA` → `wynik` (małe litery) |
+| `OperacjaStripe`, `WynikWywolania` | `platnosc/infrastructure/stripe` | `UTWORZ_SESJE`, `WYGAS_SESJE`; `SUKCES`, `BLAD`, `TIMEOUT` → `operacja`, `wynik` |
+
+`RodzajRozbieznosci` wylicza `ZlozZamowienieService` przy porównaniu potwierdzonego
+podsumowania z nową wyceną (R-14): inna cena jednostkowa → `CENA`; pozycja niedostępna lub
+ilość > stan → `DOSTEPNOSC`; inny zbiór produktów lub ilości → `SKLAD`.
+
+### Zapytania dla gauge'y
+
+| Gauge | Zapytanie | Indeks | Odświeżanie |
+|---|---|---|---|
+| `shop.outbox.oczekujace`, `shop.outbox.najstarsze` | `SELECT COUNT(*), MIN(utworzono) FROM outbox_event WHERE wyslano IS NULL` | istniejący `(wyslano, utworzono)` | wynik buforowany 15 s |
+| `shop.flyway.migracje{stan}` | `Flyway.info().all()` pogrupowane po stanie | — | raz, po `ApplicationReadyEvent` |

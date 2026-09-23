@@ -18,21 +18,33 @@ Technicznie: modularny monolit Spring Boot 4 (Java 21) z BC `katalog`, `koszyk`,
 `zamowienie`, `platnosc` + `shared`, SQL Server z Flyway, SPA React + Vite + TypeScript
 korzystająca z kontraktu OpenAPI (API-first). Szczegóły decyzji: [research.md](research.md).
 
+**Obserwowalność (US5, P2)**: Actuator + Micrometer wystawiają metryki Prometheus na osobnym
+porcie zarządzania `8081` (niedostępnym przez proxy frontendu). Metryki biznesowe zgłaszają
+serwisy aplikacyjne przez porty `Metryki*` w każdym BC, a zapis następuje dopiero po commicie.
+Adapter Stripe mierzy wywołania i ponowienia, a webhook — wyniki potwierdzeń i opóźnienie
+względem Stripe. `docker compose up -d` podnosi też Prometheusa (retencja 15 dni, 9 reguł
+alertów testowanych `promtool`) i Grafanę z 4 dashboardami z provisioningu. Logi mają
+identyfikator korelacji `X-Request-Id`. Katalog metryk: [contracts/metrics.md](contracts/metrics.md);
+decyzje R-26–R-34.
+
 ## Technical Context
 
 **Language/Version**: Java 21 (backend), TypeScript 5.x strict (frontend)
 
 **Primary Dependencies**: Spring Boot 4.0 (Web MVC, Data JPA/Hibernate 7, Validation,
 Actuator), Flyway (+ moduł SQL Server), `com.stripe:stripe-java`, springdoc-openapi (linia
-zgodna z Boot 4), ArchUnit; React 19, Vite, React Router, TanStack Query, React Hook Form + Zod,
-`openapi-typescript` + `openapi-fetch`
+zgodna z Boot 4), ArchUnit, `micrometer-registry-prometheus`; React 19, Vite, React Router,
+TanStack Query, React Hook Form + Zod, `openapi-typescript` + `openapi-fetch`;
+obserwowalność lokalna: Prometheus i Grafana (kontenery, wersje przypięte w `compose.yaml`)
 
 **Storage**: SQL Server 2022 (kolacja kolumny `produkt.nazwa` = `Polish_100_CI_AI`),
 schemat przez Flyway; statyczne zdjęcia seeda w zasobach backendu
 
 **Testing**: JUnit Jupiter + AssertJ (domena), `@SpringBootTest` + Testcontainers
 (`MSSQLServerContainer`, `stripe-mock`), WireMock (awarie Stripe), ArchUnit, test zgodności
-OpenAPI; Vitest + Testing Library + MSW (frontend); Playwright + Stripe CLI (E2E)
+OpenAPI; Vitest + Testing Library + MSW (frontend); Playwright + Stripe CLI (E2E);
+`SimpleMeterRegistry` (adaptery metryk), `promtool test rules` (alerty), `scripts/check-dashboards.mjs`
+(dashboardy vs kontrakt metryk)
 
 **Target Platform**: backend — JVM w kontenerze Linux / lokalnie Windows/macOS;
 frontend — nowoczesne przeglądarki desktop i mobile (od 360 px)
@@ -40,16 +52,20 @@ frontend — nowoczesne przeglądarki desktop i mobile (od 360 px)
 **Project Type**: aplikacja webowa — backend REST (modularny monolit) + SPA
 
 **Performance Goals**: lista, wyszukiwanie i koszyk < 1 s dla klienta przy ≥ 500 produktach
-(SC-003; budżet backendu 300 ms); status „Opłacone” ≤ 30 s od potwierdzenia Stripe (SC-007)
+(SC-003; budżet backendu 300 ms); status „Opłacone” ≤ 30 s od potwierdzenia Stripe (SC-007);
+dashboardy z danymi ≤ 2 min po starcie (SC-009); zdarzenia w metrykach ≤ 1 min (SC-010);
+narzut metryk na p95 < 5% (SC-012)
 
 **Constraints**: kwoty w groszach (`long`), bez `double`/`float`; tylko klucze testowe
 Stripe (`sk_test_`), żaden klucz Stripe we frontendzie; brak wywołań zewnętrznych wewnątrz
-transakcji; brak logowania danych osobowych i sekretów; interfejs po polsku
+transakcji; brak logowania danych osobowych i sekretów; interfejs po polsku; metryki bez
+danych osobowych i z etykietami o zamkniętym zbiorze wartości; endpoint metryk tylko na porcie
+zarządzania; zbieranie metryk nigdy nie blokuje ścieżki zakupowej
 
 **Scale/Scope**: PoC — ~500 produktów, kilkanaście kategorii, 5 ekranów, 4 BC, pojedyncza
-instancja backendu, ruch demonstracyjny
+instancja backendu, ruch demonstracyjny; 14 metryk domenowych, 9 reguł alertów, 4 dashboardy
 
-Brak pozycji „NEEDS CLARIFICATION” — wszystkie wybory rozstrzygnięte w research.md (R-01–R-25).
+Brak pozycji „NEEDS CLARIFICATION” — wszystkie wybory rozstrzygnięte w research.md (R-01–R-34).
 
 ## Constitution Check
 
@@ -57,17 +73,17 @@ Brak pozycji „NEEDS CLARIFICATION” — wszystkie wybory rozstrzygnięte w re
 
 | Zasada | Wymaganie | Jak plan je spełnia | Pre | Post |
 |---|---|---|---|---|
-| **I. Sekrety** | env/`@ConfigurationProperties`, `.env` w `.gitignore`, `.env.example`, brak `sk_` we froncie, walidacja przy starcie, gitleaks | `StripeProperties` z `@Validated` + wzorce `sk_test_`/`whsec_` blokujące start; `.env.example` rozszerzony o `STRIPE_*`, `DB_PASSWORD`, `APP_BASE_URL`; frontend nie dostaje **żadnego** klucza (hostowany Checkout); gitleaks w pre-commit i CI; maskowanie PII w logach (R-20) | ✅ | ✅ |
+| **I. Sekrety** | env/`@ConfigurationProperties`, `.env` w `.gitignore`, `.env.example`, brak `sk_` we froncie, walidacja przy starcie, gitleaks | `StripeProperties` z `@Validated` + wzorce `sk_test_`/`whsec_` blokujące start; `.env.example` rozszerzony o `STRIPE_*`, `DB_PASSWORD`, `APP_BASE_URL`; frontend nie dostaje **żadnego** klucza (hostowany Checkout); gitleaks w pre-commit i CI; maskowanie PII w logach (R-20). Obserwowalność: hasło Grafany tylko z `GRAFANA_ADMIN_PASSWORD` (brak → `compose up` przerwany), bez `admin/admin` i anonimowego dostępu; metryki bez sekretów i PII, sprawdzane testem `MetrykiEndpointIT` (R-31, R-33) | ✅ | ✅ |
 | **II. Płatności** | Stripe Checkout/Elements, kwota z serwera, grosze, tylko webhook z podpisem, idempotencja `event.id` + klucz idempotencji, tylko tryb testowy | Hostowany Checkout (SAQ A); kwota z niezmiennych pozycji zamówienia wycenionych serwerowo; `Pieniadze(long grosze)`; `Webhook.constructEvent` + odrzucenie `livemode`; tabela `przetworzone_zdarzenie_stripe` w tej samej transakcji; `Idempotency-Key: checkout-{platnoscId}`; porównanie `amount_total` z sumą (R-11, R-12, R-14) | ✅ | ✅ |
-| **III. Modularny monolit DDD** | BC z warstwami i Facade, komunikacja przez Facade/zdarzenia, domena bez adnotacji, frontend przez OpenAPI bez reguł biznesowych | BC `katalog`, `koszyk`, `zamowienie`, `platnosc` + `shared`; brak cyklu dzięki zdarzeniom `platnosc → zamowienie`; ArchUnit egzekwuje granice; kontrakt `contracts/openapi.yaml`, frontend tylko prezentuje statusy/flagi z API (R-02, R-03, R-19). BC `realizacja` — osobna funkcja (odstępstwo od „minimalnego zestawu” tylko czasowe — zob. Complexity Tracking) | ✅ | ✅ |
+| **III. Modularny monolit DDD** | BC z warstwami i Facade, komunikacja przez Facade/zdarzenia, domena bez adnotacji, frontend przez OpenAPI bez reguł biznesowych | BC `katalog`, `koszyk`, `zamowienie`, `platnosc` + `shared`; brak cyklu dzięki zdarzeniom `platnosc → zamowienie`; ArchUnit egzekwuje granice; kontrakt `contracts/openapi.yaml`, frontend tylko prezentuje statusy/flagi z API (R-02, R-03, R-19). BC `realizacja` — osobna funkcja (odstępstwo od „minimalnego zestawu” tylko czasowe — zob. Complexity Tracking). Metryki: porty `Metryki*` w `application/` każdego BC, adaptery Micrometer w `infrastructure/metrics/`; domena bez zmian; nowa reguła ArchUnit — `io.micrometer..` tylko w `..infrastructure..` (R-27) | ✅ | ✅ |
 | **IV. Ścieżki marketplace** | 4 ścieżki P1 niezależnie testowalne, blokady ilości, pokazywanie zmiany ceny | US1–US4 zmapowane na trasy i endpointy (`contracts/frontend-routes.md`); reguły ilości w agregacie `Koszyk`; `cenaZmieniona` + `409 PODSUMOWANIE_NIEAKTUALNE`; E2E na każdą ścieżkę | ✅ | ✅ |
-| **V. Integracje odizolowane** | port w `domain/`, adapter w `infrastructure/`, Outbox, timeouty/ponowienia, Trello nie blokuje zakupu | Port `BramkaPlatnosci` + adapter Stripe; timeouty 5 s/10 s, 2 ponowienia; wywołania Stripe poza transakcją; `outbox_event` zapisywany atomowo z opłaceniem; brak jakiejkolwiek zależności ścieżki zakupu od Trello (R-13, R-17) | ✅ | ✅ |
-| **VI. Testy** | jednostkowe domeny bez Springa, integracyjne `*Service` z Testcontainers, kontraktowe adapterów, webhook z poprawnym i sfałszowanym podpisem, E2E P1, brak prawdziwych sekretów | Macierz testów w R-21 i `contracts/stripe-webhook.md`; E2E Playwright + Stripe CLI z sekretami z CI | ✅ | ✅ |
-| **VII. YAGNI** | każdy dodatkowy komponent uzasadniony | Bez RabbitMQ, cache, Spring Security, Spring Session, Elasticsearch; jedyny dodatkowy kontener to Stripe CLI (narzędzie dev/E2E, nie runtime aplikacji) | ✅ | ✅ |
-| Stos i proces | Java 21, Boot 4, SQL Server, React+Vite (zatwierdzany tutaj), OpenAPI, `docker compose up`, PR z bramkami | **Zatwierdzamy React 19 + Vite + TypeScript**; `compose.yaml`; CI: build, testy, gitleaks, audyt zależności `osv-scanner` (Maven + npm) i `npm audit` (R-18, R-22) | ✅ | ✅ |
+| **V. Integracje odizolowane** | port w `domain/`, adapter w `infrastructure/`, Outbox, timeouty/ponowienia, Trello nie blokuje zakupu | Port `BramkaPlatnosci` + adapter Stripe; timeouty 5 s/10 s, 2 ponowienia; wywołania Stripe poza transakcją; `outbox_event` zapisywany atomowo z opłaceniem; brak jakiejkolwiek zależności ścieżki zakupu od Trello (R-13, R-17). Wywołania Stripe mierzone w adapterze (czas, wynik, ponowienia — ponawia adapter, nie SDK); zbieranie metryk metodą pull, więc awaria Prometheusa/Grafany nie dotyka ścieżki zakupu (R-26, R-27) | ✅ | ✅ |
+| **VI. Testy** | jednostkowe domeny bez Springa, integracyjne `*Service` z Testcontainers, kontraktowe adapterów, webhook z poprawnym i sfałszowanym podpisem, E2E P1, brak prawdziwych sekretów | Macierz testów w R-21 i `contracts/stripe-webhook.md`; E2E Playwright + Stripe CLI z sekretami z CI. Obserwowalność: macierz w R-34 — jednostkowe adapterów metryk, asercje liczników po commicie i rollbacku w testach `*Service`, `MetrykiEndpointIT`, `promtool test rules` dla każdej reguły (SC-011) | ✅ | ✅ |
+| **VII. YAGNI** | każdy dodatkowy komponent uzasadniony | Bez RabbitMQ, cache, Spring Security, Spring Session, Elasticsearch, Alertmanagera, OpenTelemetry Collectora i tracingu. Stripe CLI (narzędzie dev/E2E). **Prometheus + Grafana** — nowe kontenery, uzasadnione wprost w spec (US5, FR-032, wyraźne życzenie właściciela) — wpis w Complexity Tracking | ✅ | ✅ |
+| Stos i proces | Java 21, Boot 4, SQL Server, React+Vite (zatwierdzany tutaj), OpenAPI, `docker compose up`, PR z bramkami | **Zatwierdzamy React 19 + Vite + TypeScript**; `compose.yaml`; CI: build, testy, gitleaks, audyt zależności `osv-scanner` (Maven + npm) i `npm audit` (R-18, R-22); `docker compose up -d` podnosi też Prometheusa i Grafanę; CI dodatkowo: `promtool test rules`, `check-dashboards.mjs` (R-31, R-34) | ✅ | ✅ |
 
 **Wynik bramki**: PASS (przed Phase 0 i po Phase 1) z 2 udokumentowanymi, czasowymi
-odstępstwami (zob. Complexity Tracking).
+odstępstwami i 2 uzasadnionymi dodatkami dla US5 (zob. Complexity Tracking).
 
 **Uwagi do zgodności z `AGENTS.md`** (konwencje kodu, nie naruszenia):
 
@@ -90,16 +106,17 @@ odstępstwami (zob. Complexity Tracking).
 specs/001-shop-browse-cart-checkout/
 ├── spec.md
 ├── plan.md                  # ten plik
-├── research.md              # Phase 0 — decyzje R-01…R-25
-├── data-model.md            # Phase 1 — encje, tabele, maszyny stanów, fasady
-├── quickstart.md            # Phase 1 — uruchomienie i scenariusze walidacyjne
+├── research.md              # Phase 0 — decyzje R-01…R-34 (R-26…R-34: obserwowalność)
+├── data-model.md            # Phase 1 — encje, tabele, maszyny stanów, fasady, porty metryk
+├── quickstart.md            # Phase 1 — uruchomienie i scenariusze walidacyjne (US1–US5)
 ├── contracts/
-│   ├── openapi.yaml         # kontrakt REST (API-first)
-│   ├── stripe-webhook.md    # kontrakt integracji Stripe (wychodzące + webhook)
+│   ├── openapi.yaml         # kontrakt REST (API-first) + nagłówek X-Request-Id
+│   ├── stripe-webhook.md    # kontrakt integracji Stripe (wychodzące + webhook + metryki)
+│   ├── metrics.md           # katalog metryk, reguły alertów, dashboardy (US5)
 │   └── frontend-routes.md   # trasy SPA, parametry URL, stany widoków
 ├── checklists/
 │   └── requirements.md
-└── tasks.md                 # Phase 2 — /speckit-tasks (jeszcze nie istnieje)
+└── tasks.md                 # Phase 2 — /speckit-tasks (do regeneracji: nie obejmuje jeszcze US5)
 ```
 
 ### Source Code (repository root)
@@ -113,9 +130,10 @@ backend/
     │   │   ├── ShopApplication.java
     │   │   ├── shared/
     │   │   │   ├── domain/                  # Pieniadze, GoscId, outbox/OutboxEventPublisher (port)
-    │   │   │   ├── api/                     # GoscIdFilter (ciasteczko shop_guest), GlobalExceptionHandler (ProblemDetail)
+    │   │   │   ├── api/                     # KorelacjaFilter (X-Request-Id → MDC), GoscIdFilter (ciasteczko shop_guest), GlobalExceptionHandler (ProblemDetail)
     │   │   │   └── infrastructure/
     │   │   │       ├── outbox/              # OutboxEventJpaEntity, JpaOutboxEventPublisher (adapter)
+    │   │   │       ├── metrics/             # PoCommicie, OutboxMetryki, FlywayMetryki, MetrykiConfig (MeterFilter: limit uri)
     │   │   │       └── config/              # AppProperties (APP_BASE_URL), maskowanie PII
     │   │   ├── katalog/
     │   │   │   ├── KatalogQueryFacade.java, KatalogCommandFacade.java  # + public record DTO
@@ -126,25 +144,28 @@ backend/
     │   │   ├── koszyk/
     │   │   │   ├── KoszykQueryFacade.java, KoszykCommandFacade.java
     │   │   │   ├── domain/                  # Koszyk, PozycjaKoszyka, wyjątki domenowe, KoszykRepository
-    │   │   │   ├── application/             # KoszykService (wycena przez KatalogQueryFacade)
+    │   │   │   ├── application/             # KoszykService (wycena przez KatalogQueryFacade), MetrykiKoszyka (port)
     │   │   │   ├── infrastructure/persistence/
+    │   │   │   ├── infrastructure/metrics/  # MicrometerMetrykiKoszyka
     │   │   │   └── api/                     # KoszykController
     │   │   ├── zamowienie/
     │   │   │   ├── ZamowienieQueryFacade.java, ZamowienieOplaconeEvent.java
     │   │   │   ├── domain/                  # Zamowienie, PozycjaZamowienia, StatusZamowienia, DaneKlienta, AdresDostawy, NumerZamowienia, ZamowienieRepository
-    │   │   │   ├── application/             # ZlozZamowienieService, ObslugaPlatnosciListener
+    │   │   │   ├── application/             # ZlozZamowienieService, ObslugaPlatnosciListener, MetrykiZamowien (port), RodzajRozbieznosci
     │   │   │   ├── infrastructure/persistence/
+    │   │   │   ├── infrastructure/metrics/  # MicrometerMetrykiZamowien
     │   │   │   └── api/                     # ZamowienieController
     │   │   └── platnosc/
     │   │       ├── PlatnoscFacade.java, PlatnoscPotwierdzonaEvent.java, PlatnoscNieudanaEvent.java
     │   │       ├── domain/                  # Platnosc, StatusPlatnosci, BramkaPlatnosci (port), PotwierdzenieOperatora, PlatnoscRepository
-    │   │       ├── application/             # PlatnoscService, ObslugaWebhookaService
+    │   │       ├── application/             # PlatnoscService, ObslugaWebhookaService, MetrykiPlatnosci (port), WynikWebhooka, WynikPlatnosci
     │   │       ├── infrastructure/
     │   │       │   ├── persistence/         # PlatnoscJpaEntity, PrzetworzoneZdarzenieJpaEntity
-    │   │       │   └── stripe/              # StripeProperties, StripeBramkaPlatnosci, StripeWebhookVerifier
+    │   │       │   ├── metrics/             # MicrometerMetrykiPlatnosci
+    │   │       │   └── stripe/              # StripeProperties, StripeBramkaPlatnosci (+ ponowienia i metryki wywołań), StripeWebhookVerifier
     │   │       └── api/                     # StripeWebhookController
     │   └── resources/
-    │       ├── application.yaml, application-local.yaml
+    │       ├── application.yaml, application-local.yaml   # + management.server.port=8081, exposure health,prometheus, histogramy (R-26)
     │       ├── openapi/shop-api.yaml        # kopia contracts/openapi.yaml
     │       ├── db/migration/                # V1__katalog.sql, V2__koszyk.sql, V3__zamowienie.sql, V4__platnosc.sql, V5__outbox.sql
     │       ├── db/seed/                     # R__seed_katalog.sql (profil local/e2e)

@@ -5,7 +5,10 @@
 ## 1. Wywołania wychodzące (backend → Stripe)
 
 Wykonywane wyłącznie przez adapter `platnosc/infrastructure/stripe/StripeBramkaPlatnosci`,
-**poza transakcją bazodanową**, z timeoutami connect 5 s / read 10 s i `maxNetworkRetries = 2`.
+**poza transakcją bazodanową**, z timeoutami connect 5 s / read 10 s i 2 ponowieniami
+wykonywanymi przez adapter (`maxNetworkRetries = 0` w SDK; ten sam `Idempotency-Key`; tylko błędy
+połączenia, timeout, `5xx`, `429`). Każda próba jest mierzona w `shop.stripe.wywolania`,
+każde ponowienie w `shop.stripe.ponowienia` ([metrics.md](metrics.md), R-13, R-27).
 
 ### `POST /v1/checkout/sessions`
 
@@ -61,7 +64,22 @@ subskrybowane tylko zdarzenia z tabeli poniżej).
 | `checkout.session.async_payment_succeeded` | — | `→ POTWIERDZONA` | `PlatnoscPotwierdzonaEvent` | jw. |
 | `checkout.session.async_payment_failed` | — | `→ NIEUDANA` | `PlatnoscNieudanaEvent` | `PLATNOSC_NIEUDANA` |
 | `checkout.session.expired` | — | `→ WYGASZONA` | `PlatnoscNieudanaEvent` | `PLATNOSC_NIEUDANA` (jeśli nadal oczekuje) |
+| `payment_intent.payment_failed` | — | bez zmian (sesja nadal otwarta, klient może użyć innej karty) | — | — (tylko metryka, R-28) |
 | inne | — | — | — | `200`, ignorowane |
+
+### Metryki (R-28, R-29, [metrics.md](metrics.md))
+
+| Wynik obsługi | `shop.platnosc.webhook{wynik}` | `shop.platnosci{wynik}` | Inne |
+|---|---|---|---|
+| krok 2 nie przeszedł | `odrzucony_podpis` | — | natychmiast (poza transakcją) |
+| krok 3 (`livemode`) | `odrzucony_livemode` | — | natychmiast |
+| krok 4: duplikat `event.id` | `zduplikowane` | — | po zakończeniu transakcji |
+| `checkout.session.completed` (paid) / `async_payment_succeeded` | `przetworzone` | `udana` | po commicie: `shop.platnosc.opoznienie.potwierdzenia` = teraz − `event.created` |
+| `payment_intent.payment_failed` / `async_payment_failed` | `przetworzone` | `odrzucona` | po commicie |
+| `checkout.session.expired` | `przetworzone` | `anulowana` | po commicie |
+| `completed` z `payment_status != "paid"`, nieznana sesja, inne typy | `zignorowane` | — | po commicie |
+
+Obsługa webhooka ustawia w MDC `stripeEventId` (logi), nigdy w metrykach (FR-031).
 
 Korelacja: `data.object.id` (session id) → `Platnosc.operatorSesjaId`. Nieznana sesja →
 `200` + log `WARN` (np. zdarzenie z innego środowiska testowego na tym samym koncie).

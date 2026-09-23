@@ -26,12 +26,14 @@ wszystkie scenariusze z sekcji 3 dają oczekiwany wynik, a sekcja 4 przechodzi n
    | `STRIPE_WEBHOOK_SECRET` | `whsec_…` wypisany przez `stripe listen` (krok 3) |
    | `DB_PASSWORD` | dowolne silne hasło dla lokalnego SQL Server |
    | `APP_BASE_URL` | `http://localhost:5173` |
+   | `GRAFANA_ADMIN_PASSWORD` | dowolne silne hasło do lokalnej Grafany (bez niego `compose up` się zatrzyma — R-31) |
 
    Do pracy nad US1–US3 bez konta Stripe wystarczą atrapy `STRIPE_SECRET_KEY=sk_test_dummy`
    i `STRIPE_WEBHOOK_SECRET=whsec_dummy` — aplikacja wystartuje, a złożenie zamówienia zwróci
    „Płatność chwilowo niedostępna” (`503`). Kroku 3 wtedy nie wykonujesz.
 
-2. Zależności (SQL Server + utworzenie bazy `shop`):
+2. Zależności (SQL Server + utworzenie bazy `shop`, Prometheus na `127.0.0.1:9090`, Grafana na
+   `127.0.0.1:3000`):
 
    ```bash
    docker compose up -d
@@ -50,7 +52,7 @@ wszystkie scenariusze z sekcji 3 dają oczekiwany wynik, a sekcja 4 przechodzi n
    ./backend/mvnw -f backend/pom.xml spring-boot:run -Dspring-boot.run.profiles=local
    ```
 
-   Oczekiwane: start na `:8080`. Bez `STRIPE_SECRET_KEY` start kończy się błędem
+   Oczekiwane: start na `:8080` (API) i `:8081` (metryki i health — R-26). Bez `STRIPE_SECRET_KEY` start kończy się błędem
    „Brak wymaganej konfiguracji: shop.stripe.secret-key” — bez wartości sekretów w logu.
 
 5. Frontend (proxy `/api` i `/images` → `:8080`):
@@ -64,6 +66,8 @@ wszystkie scenariusze z sekcji 3 dają oczekiwany wynik, a sekcja 4 przechodzi n
    ```
 
    Sklep: <http://localhost:5173>. Swagger UI (tylko profil `local`): <http://localhost:8080/swagger-ui.html>.
+   Grafana: <http://localhost:3000> (login `admin`, hasło z `GRAFANA_ADMIN_PASSWORD`),
+   Prometheus: <http://localhost:9090>.
 
 ## 3. Scenariusze walidacyjne (ręcznie lub przez E2E)
 
@@ -126,6 +130,26 @@ Weryfikacja stanu w bazie (opcjonalnie): statusy w tabeli `zamowienie`, zdarzeni
 `ZamowienieOplacone` w `outbox_event` dla każdego opłaconego zamówienia, deduplikacja
 w `przetworzone_zdarzenie_stripe` — zob. [data-model.md](data-model.md).
 
+### US5 — monitorowanie (FR-025–FR-034, SC-009–SC-012)
+
+Nazwy metryk, reguł i dashboardów: [contracts/metrics.md](contracts/metrics.md). Reguły
+z `for: 5m` przechodzą w „firing” dopiero po 5 min — w CI sprawdza je `promtool` (sekcja 4).
+
+| # | Kroki | Oczekiwany wynik |
+|---|---|---|
+| 5.1 | Po kroku 2 i 4 z sekcji 2 otwórz Grafanę → Dashboards | folder „Sklep” z 4 dashboardami; źródło danych Prometheus skonfigurowane; dane w ≤ 2 min (SC-009) |
+| 5.2 | Prometheus → Status → Targets | `shop-backend` (`host.docker.internal:8081`) w stanie `UP` |
+| 5.3 | `curl -s -o /dev/null -w "%{http_code}" localhost:8080/actuator/prometheus` | `404` — metryk nie ma na porcie API (FR-025, US5-7) |
+| 5.4 | `curl -s localhost:8081/actuator/prometheus \| grep "^shop_"` | metryki z kontraktu, każda z `application="shop"`; brak e-maili, `ZAM-…`, `cs_test_…` (FR-031) |
+| 5.5 | Wykonaj scenariusz 4.4 (zakup kartą `4242…`) | w ≤ 1 min dashboard „ścieżka zakupowa”: +1 zamówienie utworzone, +1 `OPLACONE`, wartość sprzedaży rośnie o sumę zamówienia; „płatności”: +1 `udana`, opóźnienie potwierdzenia < 30 s (US5-2, SC-010) |
+| 5.6 | Wykonaj scenariusz 4.5 (karta `4000…0002`) | +1 płatność `odrzucona`, osobna seria od `udana` (US5-3, R-28) |
+| 5.7 | Wykonaj scenariusz 4.10 (sfałszowany podpis) | webhook `odrzucony_podpis` +1; alert `SfalszowanePotwierdzeniePlatnosci` „firing” w Prometheus → Alerts w ≤ 30 s, „resolved” po ~5 min (US5-4) |
+| 5.8 | Wykonaj scenariusz 4.11 (nieosiągalny Stripe) kilka razy w ciągu 5 min | panel wywołań Stripe: `wynik="blad"`/`timeout` i ponowienia; po 5 min `BledyOperatoraPlatnosci` „firing” (US5-6) |
+| 5.9 | Zatrzymaj backend (Ctrl+C) | po ~1 min `SklepNiedostepny` „firing”; po ponownym starcie „resolved”, a wykresy liczników nie mają skoków (edge case: restart) |
+| 5.10 | Zatrzymaj Prometheus i Grafanę (`docker compose stop prometheus grafana`), wykonaj scenariusz 2.1 | sklep działa bez zmian; po `docker compose start prometheus grafana` zbieranie wznawia się samo (edge case) |
+| 5.11 | Po opłaconym zamówieniu odczekaj 5 min | `OutboxZalegly` „firing” z etykietą `wymaga="realizacja"` — oczekiwane w tej funkcji (R-30); `docker compose exec sqlserver … "UPDATE outbox_event SET wyslano = SYSDATETIMEOFFSET()"` → „resolved” po następnym odczycie |
+| 5.12 | Odpowiedź dowolnego `/api/**` | nagłówek `X-Request-Id`; ta sama wartość w logu backendu przy tym żądaniu (R-32) |
+
 ## 4. Testy automatyczne
 
 | Poziom | Polecenie | Wymaga |
@@ -135,6 +159,8 @@ w `przetworzone_zdarzenie_stripe` — zob. [data-model.md](data-model.md).
 | Frontend: typy z kontraktu aktualne | `npm --prefix frontend run api:types -- --check` | — |
 | E2E (4 ścieżki P1) | `npm --prefix frontend run e2e` | stack z sekcji 2 uruchomiony, `STRIPE_*` testowe |
 | Skan sekretów | `gitleaks detect --no-banner` | — |
+| Reguły alertów (składnia + przypadki firing/resolved, SC-011) | `docker run --rm -v "$PWD/observability/prometheus:/p" --entrypoint promtool prom/prometheus test rules /p/tests/shop.test.yml` | Docker |
+| Dashboardy odwołują się do metryk z kontraktu | `node scripts/check-dashboards.mjs` | Node.js |
 
 Oczekiwane: wszystko zielone; test wydajności na seedzie 500 produktów mieści się w budżecie
 (R-24, SC-003).

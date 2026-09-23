@@ -13,6 +13,10 @@ info:
       do `/api/koszyk*` lub `/api/zamowienia*` (R-08). Frontend nie czyta ani nie ustawia go.
     - Błędy: RFC 9457 `application/problem+json` ze schematem `Problem`.
     - Ceny przesłane przez klienta NIGDY nie są używane do wyceny (FR-010, Zasada II).
+    - Każda odpowiedź zawiera nagłówek `X-Request-Id` (identyfikator korelacji w logach,
+      `components.headers.X-Request-Id`, R-32). Klient może go przesłać w żądaniu.
+    - Metryki i health NIE są częścią tego API — działają na porcie zarządzania `8081`
+      ([metrics.md](metrics.md), R-26).
 security: []  # brak uwierzytelnienia; gość identyfikowany ciasteczkiem shop_guest (R-08)
 servers:
   - url: /
@@ -301,6 +305,13 @@ components:
       in: path
       required: true
       schema: { type: integer, format: int64 }
+
+  headers:
+    X-Request-Id:
+      description: |
+        Identyfikator korelacji żądania (R-32). Echo wartości z żądania, jeśli pasuje do
+        wzorca, w przeciwnym razie UUID wygenerowany przez backend. Obecny w każdej odpowiedzi.
+      schema: { type: string, pattern: '^[A-Za-z0-9-]{8,64}$' }
 
   responses:
     BladWalidacji:
