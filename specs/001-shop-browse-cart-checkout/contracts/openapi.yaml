@@ -1,0 +1,547 @@
+openapi: 3.1.0
+info:
+  title: Shop PoC API
+  version: 0.1.0
+  description: |
+    Kontrakt REST między frontendem (SPA) a backendem dla funkcji
+    `001-shop-browse-cart-checkout`. Źródło prawdy (API-first, research R-19).
+
+    Konwencje:
+    - Wszystkie kwoty są liczbami całkowitymi w groszach (`*Grosze`), waluta PLN (R-07).
+    - Koszyk i zamówienia są powiązane z gościem przez ciasteczko `shop_guest`
+      (HttpOnly, SameSite=Lax, 30 dni), wydawane przez backend przy pierwszym żądaniu
+      do `/api/koszyk*` lub `/api/zamowienia*` (R-08). Frontend nie czyta ani nie ustawia go.
+    - Błędy: RFC 9457 `application/problem+json` ze schematem `Problem`.
+    - Ceny przesłane przez klienta NIGDY nie są używane do wyceny (FR-010, Zasada II).
+security: []  # brak uwierzytelnienia; gość identyfikowany ciasteczkiem shop_guest (R-08)
+servers:
+  - url: /
+tags:
+  - name: katalog
+  - name: koszyk
+  - name: zamowienie
+  - name: platnosc
+
+paths:
+  /api/kategorie:
+    get:
+      tags: [katalog]
+      operationId: listaKategorii
+      summary: Lista kategorii do nawigacji (FR-002)
+      responses:
+        '200':
+          description: Kategorie w kolejności wyświetlania
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Kategoria' }
+
+  /api/produkty:
+    get:
+      tags: [katalog]
+      operationId: szukajProduktow
+      summary: Lista produktów z filtrami, sortowaniem i paginacją (FR-001–FR-004)
+      description: |
+        Parametry odpowiadają 1:1 parametrom URL strony listy we frontendzie
+        (zob. `frontend-routes.md`). Zwraca wyłącznie produkty aktywne.
+      parameters:
+        - name: kategoria
+          in: query
+          description: Slug kategorii
+          schema: { type: string, pattern: '^[a-z0-9-]{1,80}$' }
+        - name: q
+          in: query
+          description: |
+            Fragment nazwy; bez rozróżniania wielkości liter i polskich znaków (FR-003).
+            Przycinany do 100 znaków; znaki specjalne dozwolone.
+          schema: { type: string }
+        - name: cenaOd
+          in: query
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: cenaDo
+          in: query
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [nazwa_asc, cena_asc, cena_desc]
+            default: nazwa_asc
+        - name: strona
+          in: query
+          description: Numer strony od 0
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: rozmiar
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 48, default: 24 }
+      responses:
+        '200':
+          description: Strona wyników (pusta lista = „brak wyników")
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StronaProduktow' }
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+
+  /api/produkty/{id}:
+    get:
+      tags: [katalog]
+      operationId: kartaProduktu
+      summary: Karta produktu (FR-005)
+      parameters:
+        - $ref: '#/components/parameters/ProduktId'
+      responses:
+        '200':
+          description: Szczegóły produktu
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProduktSzczegoly' }
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+
+  /api/koszyk:
+    get:
+      tags: [koszyk]
+      operationId: pobierzKoszyk
+      summary: Wyceniony koszyk gościa (FR-010, FR-011, FR-013)
+      description: Pusty koszyk, gdy gość jeszcze go nie ma. Może ustawić ciasteczko `shop_guest`.
+      responses:
+        '200':
+          description: Koszyk wyceniony aktualnymi cenami katalogu
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Koszyk' }
+    delete:
+      tags: [koszyk]
+      operationId: wyczyscKoszyk
+      summary: Wyczyść cały koszyk (FR-009)
+      responses:
+        '200':
+          description: Pusty koszyk
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Koszyk' }
+
+  /api/koszyk/pozycje:
+    post:
+      tags: [koszyk]
+      operationId: dodajDoKoszyka
+      summary: Dodaj produkt (scalanie ilości, FR-006–FR-008)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DodajPozycjeRequest' }
+      responses:
+        '200':
+          description: Koszyk po dodaniu
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Koszyk' }
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+        '409':
+          description: |
+            `ILOSC_PRZEKRACZA_LIMIT` (pole `maksIlosc` = ile jeszcze można dodać łącznie
+            w pozycji) lub `PRODUKT_NIEDOSTEPNY`. Koszyk bez zmian.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /api/koszyk/pozycje/{produktId}:
+    parameters:
+      - name: produktId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    put:
+      tags: [koszyk]
+      operationId: zmienIlosc
+      summary: Ustaw ilość pozycji; 0 usuwa pozycję (FR-008, FR-009)
+      description: |
+        Ilość większa niż dostępna jest ograniczana do `min(stan, 99)`; wtedy odpowiedź
+        zawiera komunikat `ILOSC_OGRANICZONA` w `komunikaty` (US3-3).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ZmienIloscRequest' }
+      responses:
+        '200':
+          description: Koszyk po zmianie
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Koszyk' }
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+    delete:
+      tags: [koszyk]
+      operationId: usunPozycje
+      summary: Usuń pozycję (idempotentne)
+      responses:
+        '200':
+          description: Koszyk po usunięciu
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Koszyk' }
+
+  /api/koszyk/akceptuj-ceny:
+    post:
+      tags: [koszyk]
+      operationId: akceptujCeny
+      summary: Potwierdź zapoznanie się ze zmianami cen (FR-011, R-09)
+      responses:
+        '200':
+          description: Koszyk bez flag `cenaZmieniona`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Koszyk' }
+
+  /api/zamowienia:
+    post:
+      tags: [zamowienie]
+      operationId: zlozZamowienie
+      summary: Utwórz zamówienie i rozpocznij płatność Stripe Checkout (FR-014–FR-018)
+      description: |
+        Backend ponownie wycenia koszyk i porównuje z `potwierdzonePodsumowanie`
+        (R-14). Przy zgodności tworzy zamówienie `OCZEKUJE_NA_PLATNOSC` z niezmiennymi
+        pozycjami, tworzy sesję Stripe i zwraca `urlPlatnosci`, na który frontend
+        przekierowuje. Koszyk NIE jest czyszczony w tym kroku.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ZlozZamowienieRequest' }
+      responses:
+        '201':
+          description: Zamówienie utworzone, płatność rozpoczęta
+          headers:
+            Location:
+              schema: { type: string }
+              description: /api/zamowienia/{numer}
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RozpoczetaPlatnosc' }
+        '400':
+          $ref: '#/components/responses/BladWalidacji'
+        '409':
+          description: |
+            `PODSUMOWANIE_NIEAKTUALNE` — cena/dostępność/skład zmieniły się; w `koszyk`
+            aktualne podsumowanie do ponownego zatwierdzenia (US4-7).
+            `KOSZYK_NIE_DO_ZAMOWIENIA` — koszyk pusty lub z pozycjami niedostępnymi (FR-014).
+            `ZAMOWIENIE_JUZ_OPLACONE` — poprzednia sesja gościa została już opłacona (R-13).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemZKoszykiem' }
+        '503':
+          description: '`PLATNOSC_NIEDOSTEPNA` — operator chwilowo niedostępny; koszyk bez zmian.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /api/zamowienia/{numer}:
+    get:
+      tags: [zamowienie]
+      operationId: pobierzZamowienie
+      summary: Strona potwierdzenia — tylko dla gościa, który złożył zamówienie (FR-023)
+      description: |
+        Zwraca `404`, gdy zamówienie nie istnieje LUB należy do innego gościa (R-15).
+        Frontend odpytuje co 2 s, dopóki status = `OCZEKUJE_NA_PLATNOSC` (maks. 60 s, US4-6).
+      parameters:
+        - name: numer
+          in: path
+          required: true
+          schema: { type: string, pattern: '^ZAM-[0-9A-HJKMNP-TV-Z]{10}$' }
+      responses:
+        '200':
+          description: Zamówienie
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Zamowienie' }
+        '404':
+          $ref: '#/components/responses/NieZnaleziono'
+
+  /api/platnosci/stripe/webhook:
+    post:
+      tags: [platnosc]
+      operationId: webhookStripe
+      summary: Webhook Stripe (FR-019, FR-020) — wywoływany wyłącznie przez Stripe
+      description: |
+        Szczegóły obsługiwanych zdarzeń: `stripe-webhook.md`. Ciało przetwarzane jako
+        surowy tekst (wymagane do weryfikacji podpisu). Nie wymaga ciasteczka.
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Obiekt `Event` Stripe
+      responses:
+        '200':
+          description: Zdarzenie przetworzone, zignorowane lub duplikat
+        '400':
+          description: Brak lub niepoprawny podpis / nieczytelne ciało — brak efektów
+        '500':
+          description: Błąd techniczny — Stripe ponowi dostarczenie
+
+components:
+  parameters:
+    ProduktId:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+
+  responses:
+    BladWalidacji:
+      description: Niepoprawne dane wejściowe (`kod = BLAD_WALIDACJI`, błędy per pole)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NieZnaleziono:
+      description: Zasób nie istnieje lub jest niedostępny dla tego gościa
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    StatusDostepnosci:
+      type: string
+      enum: [DOSTEPNY, OSTATNIE_SZTUKI, NIEDOSTEPNY]
+
+    Kategoria:
+      type: object
+      required: [slug, nazwa]
+      properties:
+        slug: { type: string }
+        nazwa: { type: string }
+
+    Zdjecie:
+      type: object
+      required: [url, alt]
+      properties:
+        url: { type: string, examples: ['/images/sluchawki-1.jpg'] }
+        alt: { type: string }
+
+    ProduktNaLiscie:
+      type: object
+      required: [id, nazwa, cenaGrosze, status, zdjecie, maksDoKoszyka]
+      properties:
+        id: { type: integer, format: int64 }
+        nazwa: { type: string }
+        cenaGrosze: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/StatusDostepnosci' }
+        zdjecie: { $ref: '#/components/schemas/Zdjecie' }
+        maksDoKoszyka:
+          type: integer
+          description: '`min(stan, 99)`; 0 dla niedostępnych — przycisk nieaktywny (US2-4)'
+
+    StronaProduktow:
+      type: object
+      required: [produkty, strona, rozmiar, lacznie, liczbaStron]
+      properties:
+        produkty:
+          type: array
+          items: { $ref: '#/components/schemas/ProduktNaLiscie' }
+        strona: { type: integer }
+        rozmiar: { type: integer }
+        lacznie: { type: integer, format: int64 }
+        liczbaStron: { type: integer }
+
+    ProduktSzczegoly:
+      type: object
+      required: [id, nazwa, opis, cenaGrosze, status, zdjecia, kategoria, maksDoKoszyka]
+      properties:
+        id: { type: integer, format: int64 }
+        nazwa: { type: string }
+        opis: { type: string }
+        cenaGrosze: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/StatusDostepnosci' }
+        zdjecia:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Zdjecie' }
+        kategoria: { $ref: '#/components/schemas/Kategoria' }
+        maksDoKoszyka: { type: integer }
+
+    DodajPozycjeRequest:
+      type: object
+      required: [produktId, ilosc]
+      additionalProperties: false
+      properties:
+        produktId: { type: integer, format: int64 }
+        ilosc: { type: integer, minimum: 1, maximum: 99 }
+
+    ZmienIloscRequest:
+      type: object
+      required: [ilosc]
+      additionalProperties: false
+      properties:
+        ilosc: { type: integer, minimum: 0, maximum: 99 }
+
+    PozycjaKoszyka:
+      type: object
+      required: [produktId, nazwa, zdjecieUrl, cenaJednostkowaGrosze, ilosc, wartoscGrosze,
+                 status, maksIlosc, cenaZmieniona, iloscPrzekraczaStan]
+      properties:
+        produktId: { type: integer, format: int64 }
+        nazwa: { type: string }
+        zdjecieUrl: { type: string }
+        cenaJednostkowaGrosze:
+          type: integer
+          format: int64
+          description: Aktualna cena z katalogu
+        ilosc: { type: integer }
+        wartoscGrosze: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/StatusDostepnosci' }
+        maksIlosc: { type: integer }
+        cenaZmieniona: { type: boolean }
+        poprzedniaCenaGrosze:
+          type: [integer, 'null']
+          format: int64
+          description: Cena z chwili dodania, gdy `cenaZmieniona = true`
+        iloscPrzekraczaStan: { type: boolean }
+
+    Komunikat:
+      type: object
+      required: [kod, tresc]
+      properties:
+        kod:
+          type: string
+          enum: [ILOSC_OGRANICZONA, CENA_ZMIENIONA, PRODUKT_NIEDOSTEPNY, ILOSC_PRZEKRACZA_STAN]
+        produktId: { type: [integer, 'null'], format: int64 }
+        tresc: { type: string, description: Komunikat po polsku do wyświetlenia }
+
+    Koszyk:
+      type: object
+      required: [pozycje, liczbaSztuk, sumaGrosze, moznaZamowic, komunikaty]
+      properties:
+        pozycje:
+          type: array
+          items: { $ref: '#/components/schemas/PozycjaKoszyka' }
+        liczbaSztuk:
+          type: integer
+          description: Licznik w nagłówku (FR-013)
+        sumaGrosze: { type: integer, format: int64 }
+        moznaZamowic: { type: boolean }
+        komunikaty:
+          type: array
+          items: { $ref: '#/components/schemas/Komunikat' }
+
+    PotwierdzonaPozycja:
+      type: object
+      required: [produktId, ilosc, cenaJednostkowaGrosze]
+      additionalProperties: false
+      properties:
+        produktId: { type: integer, format: int64 }
+        ilosc: { type: integer, minimum: 1, maximum: 99 }
+        cenaJednostkowaGrosze: { type: integer, format: int64 }
+
+    ZlozZamowienieRequest:
+      type: object
+      required: [email, imieNazwisko, ulicaINumer, kodPocztowy, miejscowosc, potwierdzonePodsumowanie]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        imieNazwisko: { type: string, minLength: 2, maxLength: 100 }
+        ulicaINumer: { type: string, minLength: 3, maxLength: 120 }
+        kodPocztowy: { type: string, pattern: '^\d{2}-\d{3}$' }
+        miejscowosc: { type: string, minLength: 2, maxLength: 60 }
+        potwierdzonePodsumowanie:
+          type: object
+          description: Podsumowanie widziane przez klienta — tylko do porównania (R-14)
+          required: [pozycje, sumaGrosze]
+          additionalProperties: false
+          properties:
+            pozycje:
+              type: array
+              minItems: 1
+              items: { $ref: '#/components/schemas/PotwierdzonaPozycja' }
+            sumaGrosze: { type: integer, format: int64 }
+
+    RozpoczetaPlatnosc:
+      type: object
+      required: [numer, urlPlatnosci]
+      properties:
+        numer: { type: string, examples: ['ZAM-7K2Q9M4XTB'] }
+        urlPlatnosci:
+          type: string
+          format: uri
+          description: URL hostowanej strony Stripe Checkout
+
+    StatusZamowienia:
+      type: string
+      enum: [OCZEKUJE_NA_PLATNOSC, OPLACONE, PLATNOSC_NIEUDANA, WYMAGA_WYJASNIENIA]
+
+    PozycjaZamowienia:
+      type: object
+      required: [nazwa, cenaJednostkowaGrosze, ilosc, wartoscGrosze]
+      properties:
+        nazwa: { type: string }
+        cenaJednostkowaGrosze: { type: integer, format: int64 }
+        ilosc: { type: integer }
+        wartoscGrosze: { type: integer, format: int64 }
+
+    Zamowienie:
+      type: object
+      required: [numer, status, pozycje, sumaGrosze, utworzono]
+      properties:
+        numer: { type: string }
+        status: { $ref: '#/components/schemas/StatusZamowienia' }
+        pozycje:
+          type: array
+          items: { $ref: '#/components/schemas/PozycjaZamowienia' }
+        sumaGrosze: { type: integer, format: int64 }
+        utworzono: { type: string, format: date-time }
+        oplacono: { type: [string, 'null'], format: date-time }
+
+    BladPola:
+      type: object
+      required: [pole, komunikat]
+      properties:
+        pole: { type: string, examples: [kodPocztowy] }
+        komunikat: { type: string, examples: ['Kod pocztowy musi mieć format NN-NNN'] }
+
+    Problem:
+      type: object
+      description: RFC 9457 Problem Details
+      required: [title, status, kod]
+      properties:
+        type: { type: string, format: uri, default: about:blank }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string, description: "Komunikat po polsku, bez danych wrażliwych" }
+        kod:
+          type: string
+          enum:
+            - BLAD_WALIDACJI
+            - NIE_ZNALEZIONO
+            - ILOSC_PRZEKRACZA_LIMIT
+            - PRODUKT_NIEDOSTEPNY
+            - PODSUMOWANIE_NIEAKTUALNE
+            - KOSZYK_NIE_DO_ZAMOWIENIA
+            - ZAMOWIENIE_JUZ_OPLACONE
+            - PLATNOSC_NIEDOSTEPNA
+            - KONFLIKT_WSPOLBIEZNOSCI
+            - BLAD_WEWNETRZNY
+        maksIlosc: { type: [integer, 'null'] }
+        bledy:
+          type: array
+          items: { $ref: '#/components/schemas/BladPola' }
+
+    ProblemZKoszykiem:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            koszyk: { $ref: '#/components/schemas/Koszyk' }
