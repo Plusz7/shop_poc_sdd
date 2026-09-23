@@ -3,6 +3,7 @@
 # Usage: check-english.sh [paths...]   (no args = files changed vs HEAD, incl. untracked)
 # Exit code: 0 = clean, 1 = findings.
 set -u
+export LC_ALL=C.UTF-8   # grep -P must match characters, not bytes (→, – would hit ą, ł)
 
 # Locale-only translation files and seed data may legitimately contain Polish.
 EXCLUDE='(^|/)(pl|pl-PL)\.json$|(^|/)i18n/pl/|(^|/)seed/|node_modules/|target/|dist/|\.git/|\.claude/skills/english-only/'

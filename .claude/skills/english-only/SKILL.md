@@ -8,8 +8,8 @@ description: Pilnuje, żeby wszystko, co trafia do repozytorium shop_pof, było 
 **Zasada:** wszystko, co ląduje w repozytorium albo w narzędziach zespołu, jest po angielsku.
 Rozmowa z użytkownikiem na czacie zostaje po polsku — to jedyny wyjątek.
 
-Ta zasada zastępuje starsze ustalenia „klasy domenowe po polsku” (`AGENTS.md`, skill `commit`,
-nazwy BC w konstytucji). Jeśli trafisz na taki konflikt — stosuj angielski i wspomnij
+Ta zasada zastępuje starsze ustalenie „klasy domenowe po polsku” z `AGENTS.md` (konstytucja 1.1.0
+i skill `commit` są już zgodne). Jeśli trafisz na taki konflikt — stosuj angielski i wspomnij
 użytkownikowi o niespójności w jednej linijce, zamiast po cichu dostosowywać się do starego stylu.
 
 ## Co musi być po angielsku
@@ -54,7 +54,10 @@ użytkownikowi o niespójności w jednej linijce, zamiast po cichu dostosowywać
 | zdarzenie | event |
 | fasada | facade |
 
-Nowe pojęcie spoza słownika: wybierz jedną nazwę, dopisz ją tutaj i trzymaj się jej wszędzie
+Pełna lista identyfikatorów (klasy, tabele, endpointy, enumy, metryki, pliki) jest w
+[glossary.md](glossary.md) — sprawdź ją przed nazwaniem czegokolwiek.
+
+Nowe pojęcie spoza słownika: wybierz jedną nazwę, dopisz ją do `glossary.md` i trzymaj się jej wszędzie
 (kod, API, baza, dokumentacja) — zero synonimów (`order` vs `purchase`).
 
 ## Przebieg
@@ -73,7 +76,7 @@ Nowe pojęcie spoza słownika: wybierz jedną nazwę, dopisz ją tutaj i trzymaj
 
 ## Edytowanie istniejących polskich plików
 
-Starsze artefakty (`specs/001-*`, konstytucja, `docs/`) są po polsku. Gdy je edytujesz:
+Starsze artefakty (np. `docs/kanban-trello.md`) mogą być jeszcze po polsku. Gdy je edytujesz:
 - nowy lub zmieniany fragment pisz po angielsku;
 - **nie tłumacz całego pliku przy okazji** — mieszana wersja to stan przejściowy, a masowe
   tłumaczenie to osobne zadanie (`docs: translate … to English`), które proponujesz użytkownikowi;

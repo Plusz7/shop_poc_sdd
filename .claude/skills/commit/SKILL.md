@@ -20,7 +20,7 @@ Commituj tylko wtedy, gdy użytkownik o to poprosił albo wprost upoważnił ci�
 5. **Napisz wiadomość** według formatu poniżej i sprawdź ją z checklistą.
 6. **Commit** — każde `-m` to osobny akapit:
    ```bash
-   git commit -m "feat(koszyk): add cart aggregate with line limits" -m "Limit 99 szt. na pozycję wynika z FR-012." -m "Refs: T037"
+   git commit -m "feat(cart): add cart aggregate with line limits" -m "The 99-item line limit comes from FR-008." -m "Refs: T037"
    ```
    Commit tworzony przez agenta kończy się stopką `Co-Authored-By` z bieżącego przypomnienia systemowego.
 7. Jeśli zostały inne zmiany — wróć do kroku 3.
@@ -50,17 +50,17 @@ BREAKING CHANGE: <co przestaje działać i jak migrować>
 | `style` | formatowanie bez zmian logiki |
 | `revert` | cofnięcie commita |
 
-**Scope** = bounded context lub obszar: `katalog`, `koszyk`, `platnosc`, `zamowienie`, `shared`,
+**Scope** = bounded context lub obszar: `catalog`, `cart`, `payment`, `order`, `shared`,
 `support`, `arch` (ArchUnit), `backend` (poza BC), `frontend`, `db` (migracje), `e2e`, `api`
 (kontrakt OpenAPI), `deps`, `specs`, `constitution`, `skills`, `mcp`, `ci`, `docker`.
-Jedna zmiana w kilku BC: `feat(koszyk,zamowienie): …` albo bez scope. Czysto dokumentacyjne
+Jedna zmiana w kilku BC: `feat(cart,order): …` albo bez scope. Czysto dokumentacyjne
 commity mogą być bez scope (`docs: …`), tak jak dotychczasowa historia.
 
 ### Checklista wiadomości
 
 - [ ] Nagłówek ≤ 72 znaki.
 - [ ] Opis po angielsku (jak dotychczasowa historia), w trybie rozkazującym: `add`, `fix`, `update` —
-      nie `added`/`adds`/`dodano`. Nazwy domenowe zostają po polsku (`add Koszyk line limit`).
+      nie `added`/`adds`/`dodano`. Nazwy domenowe też po angielsku (skill `english-only`).
 - [ ] Opis zaczyna się małą literą (chyba że to akronim/nazwa klasy) i nie kończy się kropką.
 - [ ] Opis mówi konkretnie, CO się zmienia — żadnych `wip`, `fixes`, `changes`, `misc`.
 - [ ] Pusta linia między nagłówkiem a treścią.
@@ -71,10 +71,10 @@ commity mogą być bez scope (`docs: …`), tak jak dotychczasowa historia.
 
 Przykłady:
 ```
-feat(katalog): add product search by name and category
-fix(platnosc): reject webhook with invalid Stripe signature
-refactor(koszyk): extract KoszykMapper from KoszykService
-test(zamowienie): cover outbox event on order placement
+feat(catalog): add product search by name and category
+fix(payment): reject webhook with invalid Stripe signature
+refactor(cart): extract CartMapper from CartService
+test(order): cover outbox event on order placement
 build(deps): bump spring-boot to 4.0.1
 docs(specs): clarify cart quantity limits in spec
 ```
