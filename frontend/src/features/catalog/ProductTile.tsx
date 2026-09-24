@@ -1,6 +1,7 @@
 import { Link } from 'react-router';
 import type { Schemas } from '../../api/client';
 import { formatPln } from '../../shared/formatPln';
+import { AddToCartButton } from '../cart/AddToCartButton';
 import { AvailabilityLabel } from './AvailabilityLabel';
 import styles from './ProductTile.module.css';
 
@@ -25,6 +26,13 @@ export function ProductTile({ product }: ProductTileProps) {
       <div className={styles.footer}>
         <span className={styles.price}>{formatPln(product.priceMinor)}</span>
         <AvailabilityLabel status={product.status} />
+        <AddToCartButton
+          productId={product.id}
+          productName={product.name}
+          status={product.status}
+          maxAddable={product.maxAddable}
+          variant="tile"
+        />
       </div>
     </article>
   );

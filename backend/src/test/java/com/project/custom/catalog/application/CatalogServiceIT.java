@@ -39,14 +39,12 @@ class CatalogServiceIT extends IntegrationTest {
 
     @BeforeEach
     void createFixtureProducts() {
-        long category = jdbcTemplate.queryForObject(
-                "INSERT INTO category (name, slug, display_order) OUTPUT INSERTED.id VALUES (?, ?, ?)",
-                Long.class, "Test fixtures", FIXTURES, 999);
-        lodzMug = product(category, "Łódź kubek testowy", 5_000, 10, true);
-        setA = product(category, "Zestaw testowy A", 15_000, 2, true);
-        setB = product(category, "Zestaw testowy B", 15_000, 5, true);
-        setC = product(category, "Zestaw testowy C", 25_000, 0, true);
-        hidden = product(category, "Ukryty produkt testowy", 9_000, 5, false);
+        long category = createFixtureCategory();
+        lodzMug = createFixtureProduct(category, "Łódź kubek testowy", 5_000, 10, true);
+        setA = createFixtureProduct(category, "Zestaw testowy A", 15_000, 2, true);
+        setB = createFixtureProduct(category, "Zestaw testowy B", 15_000, 5, true);
+        setC = createFixtureProduct(category, "Zestaw testowy C", 25_000, 0, true);
+        hidden = createFixtureProduct(category, "Ukryty produkt testowy", 9_000, 5, false);
         jdbcTemplate.update("INSERT INTO product_image (product_id, display_order, url, alt) VALUES (?, 1, ?, ?)",
                 setA, "/images/test-second.svg", "Second image");
     }
@@ -211,15 +209,5 @@ class CatalogServiceIT extends IntegrationTest {
     void catalogResponsesDoNotIssueTheGuestCookie() throws Exception {
         mockMvc.perform(get("/api/products"))
                 .andExpect(header().doesNotExist("Set-Cookie"));
-    }
-
-    private long product(long categoryId, String name, long priceMinor, int stock, boolean active) {
-        long id = jdbcTemplate.queryForObject("""
-                        INSERT INTO product (name, description, price_minor, category_id, stock, active, version)
-                        OUTPUT INSERTED.id VALUES (?, ?, ?, ?, ?, ?, 0)""",
-                Long.class, name, "Opis: " + name, priceMinor, categoryId, stock, active);
-        jdbcTemplate.update("INSERT INTO product_image (product_id, display_order, url, alt) VALUES (?, 0, ?, ?)",
-                id, "/images/test-" + id + ".svg", name);
-        return id;
     }
 }

@@ -41,5 +41,22 @@
   "product.description": "Opis",
   "product.gallery": "Zdjęcia produktu",
   "product.showImage": "Pokaż zdjęcie {index}",
-  "product.backToList": "Wróć do listy produktów"
+  "product.backToList": "Wróć do listy produktów",
+  "header.cart": "Koszyk, liczba produktów: {count}",
+  "header.cartLabel": "Koszyk",
+  "common.actionFailed": "Nie udało się wykonać operacji. Spróbuj ponownie.",
+  "cart.add": "Dodaj do koszyka",
+  "cart.addNamed": "Dodaj do koszyka: {name}",
+  "cart.quantity": "Liczba sztuk",
+  "cart.added": "Dodano do koszyka",
+  "cart.quantityExceedsLimit": "Możesz dodać najwyżej {max} szt.",
+  "cart.lineFull": "Masz już w koszyku maksymalną dostępną liczbę sztuk tego produktu.",
+  "cart.productUnavailable": "Ten produkt jest obecnie niedostępny.",
+  "cart.title": "Koszyk",
+  "cart.empty": "Twój koszyk jest pusty",
+  "cart.backToShop": "Przejdź do sklepu",
+  "cart.lines": "Produkty w koszyku",
+  "cart.total": "Razem",
+  "cart.unitPrice": "Cena: {price}",
+  "cart.lineQuantity": "Liczba sztuk: {quantity}"
 }

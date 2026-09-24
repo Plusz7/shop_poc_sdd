@@ -59,6 +59,24 @@ public abstract class IntegrationTest {
         }
     }
 
+    /** Creates the {@link #TEST_FIXTURE_CATEGORY} category; it and its products are removed before every test. */
+    protected long createFixtureCategory() {
+        return jdbcTemplate.queryForObject(
+                "INSERT INTO category (name, slug, display_order) OUTPUT INSERTED.id VALUES (?, ?, ?)",
+                Long.class, "Test fixtures", TEST_FIXTURE_CATEGORY, 999);
+    }
+
+    /** Creates a product with the main image {@code /images/test-<id>.svg} whose alt text is the product name. */
+    protected long createFixtureProduct(long categoryId, String name, long priceMinor, int stock, boolean active) {
+        long id = jdbcTemplate.queryForObject("""
+                        INSERT INTO product (name, description, price_minor, category_id, stock, active, version)
+                        OUTPUT INSERTED.id VALUES (?, ?, ?, ?, ?, ?, 0)""",
+                Long.class, name, "Opis: " + name, priceMinor, categoryId, stock, active);
+        jdbcTemplate.update("INSERT INTO product_image (product_id, display_order, url, alt) VALUES (?, 0, ?, ?)",
+                id, "/images/test-" + id + ".svg", name);
+        return id;
+    }
+
     private boolean tableExists(String table) {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = ?", Integer.class, table);
