@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { ApiError, type Schemas } from '../../api/client';
 import { t } from '../../i18n/t';
+import { AddToCartButton } from '../cart/AddToCartButton';
 import { Banner } from '../../shared/Banner';
 import { formatPln } from '../../shared/formatPln';
 import { useProduct } from './api';
@@ -48,6 +49,14 @@ export function ProductPage() {
         <h1 className={styles.name}>{product.name}</h1>
         <p className={styles.price}>{formatPln(product.priceMinor)}</p>
         <AvailabilityLabel status={product.status} />
+        <AddToCartButton
+          key={product.id}
+          productId={product.id}
+          productName={product.name}
+          status={product.status}
+          maxAddable={product.maxAddable}
+          variant="product"
+        />
         <section className={styles.description}>
           <h2>{t('product.description')}</h2>
           <p>{product.description}</p>

@@ -1,9 +1,10 @@
 import { Link, Outlet } from 'react-router';
+import { CartCounter } from '../features/cart/CartCounter';
 import { t } from '../i18n/t';
 import styles from './Layout.module.css';
 import { SearchBox } from './SearchBox';
 
-/** Page shell: header (logo, search box slot, cart counter slot) and the routed content. */
+/** Page shell: header (logo, search box, cart counter) and the routed content. */
 export function Layout() {
   return (
     <div className={styles.page}>
@@ -18,7 +19,9 @@ export function Layout() {
           <div className={styles.search}>
             <SearchBox />
           </div>
-          <div className={styles.cart} data-slot="cart" />
+          <div className={styles.cart}>
+            <CartCounter />
+          </div>
         </div>
       </header>
       <main id="main" className={styles.main}>
