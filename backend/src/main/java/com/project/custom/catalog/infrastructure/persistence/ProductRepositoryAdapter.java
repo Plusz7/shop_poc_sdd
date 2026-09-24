@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Product list search in two queries (count + page) with the main image joined in — no N+1 (R-24).
@@ -67,6 +68,13 @@ class ProductRepositoryAdapter implements ProductRepository {
     @Override
     public Optional<Product> findActive(ProductId id) {
         return jpaRepository.findByIdAndActiveTrue(id.value()).map(CatalogPersistenceMapper::toDomain);
+    }
+
+    @Override
+    public List<Product> findAllByIds(Set<ProductId> ids) {
+        return jpaRepository.findAllByIdIn(ids.stream().map(ProductId::value).toList()).stream()
+                .map(CatalogPersistenceMapper::toDomain)
+                .toList();
     }
 
     private static String fromAndWhere(SearchCriteria criteria, Map<String, Object> parameters) {
