@@ -39,17 +39,26 @@ async function fillDetails(page: Page) {
   await page.getByLabel('Miejscowość').fill('Gdańsk');
 }
 
-/** Submits the form and returns the order number once the browser is on the Stripe payment page. */
+/**
+ * Submits the form and returns the order number once the browser is on the Stripe payment page. The order
+ * response is read inside a route handler, before the app sees it: the app redirects to Stripe as soon as
+ * it arrives, and the browser discards the body of a response that was navigated away from.
+ */
 async function goToStripe(page: Page): Promise<string> {
-  const placed = page.waitForResponse(
-    (response) => response.url().endsWith('/api/orders') && response.request().method() === 'POST',
-  );
+  let placed: { status: number; body: { number: string } } | undefined;
+  await page.route('**/api/orders', async (route) => {
+    if (route.request().method() !== 'POST') {
+      return route.fallback();
+    }
+    const response = await route.fetch();
+    placed = { status: response.status(), body: (await response.json()) as { number: string } };
+    await route.fulfill({ response });
+  });
   await submit(page).click();
-  const response = await placed;
-  expect(response.status()).toBe(201);
-  const { number } = (await response.json()) as { number: string };
   await page.waitForURL(/checkout\.stripe\.com/, { timeout: 30_000 });
-  return number;
+  await page.unroute('**/api/orders');
+  expect(placed?.status).toBe(201);
+  return placed!.body.number;
 }
 
 async function payWithCard(page: Page, cardNumber: string) {
