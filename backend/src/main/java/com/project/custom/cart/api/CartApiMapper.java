@@ -1,13 +1,13 @@
 package com.project.custom.cart.api;
 
+import com.project.custom.cart.CartViewDto;
+import com.project.custom.cart.CartViewFacade;
+import com.project.custom.cart.PricedCartDto;
+import com.project.custom.cart.application.PricedCartMapper;
 import com.project.custom.cart.application.QuantityChange;
-import com.project.custom.cart.domain.CartProblem;
 import com.project.custom.cart.domain.PricedCart;
-import com.project.custom.cart.domain.PricedLine;
-import com.project.custom.cart.domain.ProductAvailability;
 import com.project.custom.cart.domain.QuantityCapped;
 import com.project.custom.shared.api.UiMessages;
-import com.project.custom.shared.domain.Money;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -18,10 +18,11 @@ import java.util.stream.Collectors;
 
 /**
  * Mapping of the priced cart to the contract schemas {@code Cart}, {@code CartLine} and {@code Message}
- * (openapi.yaml). Message texts are the customer-facing copy from {@link UiMessages}.
+ * (openapi.yaml). Message texts are the customer-facing copy from {@link UiMessages}. Other contexts reuse it
+ * through {@link CartViewFacade}.
  */
 @Component
-class CartApiMapper {
+class CartApiMapper implements CartViewFacade {
 
     private static final String QUANTITY_CAPPED = "QUANTITY_CAPPED";
 
@@ -31,58 +32,48 @@ class CartApiMapper {
         this.uiMessages = uiMessages;
     }
 
-    CartResponse toResponse(PricedCart cart) {
-        return toResponse(cart, List.of());
+    CartViewDto toResponse(PricedCart cart) {
+        return view(PricedCartMapper.toDto(cart));
     }
 
     /** The cart after a quantity change; a cap applied comes first in {@code messages} (US3-3). */
-    CartResponse toResponse(QuantityChange change) {
+    CartViewDto toResponse(QuantityChange change) {
         QuantityCapped capped = change.capped();
-        List<MessageResponse> actionMessages = capped == null ? List.of() : List.of(new MessageResponse(
+        List<CartViewDto.Message> actionMessages = capped == null ? List.of() : List.of(new CartViewDto.Message(
                 QUANTITY_CAPPED, change.productId(),
                 uiMessages.get("cart.message.quantity-capped", capped.maxQuantity())));
-        return toResponse(change.cart(), actionMessages);
+        return toResponse(PricedCartMapper.toDto(change.cart()), actionMessages);
     }
 
-    private CartResponse toResponse(PricedCart cart, List<MessageResponse> actionMessages) {
-        List<CartLineResponse> lines = cart.lines().stream().map(this::toResponse).toList();
-        Map<Long, CartLineResponse> linesById = lines.stream()
-                .collect(Collectors.toMap(CartLineResponse::productId, Function.identity()));
-        List<MessageResponse> messages = new ArrayList<>(actionMessages);
+    @Override
+    public CartViewDto view(PricedCartDto cart) {
+        return toResponse(cart, List.of());
+    }
+
+    private CartViewDto toResponse(PricedCartDto cart, List<CartViewDto.Message> actionMessages) {
+        List<CartViewDto.Line> lines = cart.lines().stream().map(this::toResponse).toList();
+        Map<Long, CartViewDto.Line> linesById = lines.stream()
+                .collect(Collectors.toMap(CartViewDto.Line::productId, Function.identity()));
+        List<CartViewDto.Message> messages = new ArrayList<>(actionMessages);
         cart.problems().forEach(problem -> messages.add(toMessage(problem, linesById.get(problem.productId()))));
-        return new CartResponse(lines, cart.itemCount(), cart.total().minor(), cart.canPlaceOrder(), messages);
+        return new CartViewDto(lines, cart.itemCount(), cart.totalMinor(), cart.canPlaceOrder(), messages);
     }
 
-    private CartLineResponse toResponse(PricedLine line) {
+    private CartViewDto.Line toResponse(PricedCartDto.Line line) {
         String name = line.name().isBlank() ? uiMessages.get("cart.removed-product") : line.name();
-        return new CartLineResponse(line.productId(), name, line.imageUrl(), line.unitPrice().minor(),
-                line.quantity(), line.lineTotal().minor(), line.availability(), line.maxQuantity(),
-                line.priceChanged(), minorOrNull(line.previousPrice()), line.quantityExceedsStock());
+        return new CartViewDto.Line(line.productId(), name, line.imageUrl(), line.unitPriceMinor(),
+                line.quantity(), line.lineTotalMinor(), line.status(), line.maxQuantity(),
+                line.priceChanged(), line.previousPriceMinor(), line.quantityExceedsStock());
     }
 
-    private MessageResponse toMessage(CartProblem problem, CartLineResponse line) {
+    private CartViewDto.Message toMessage(PricedCartDto.Problem problem, CartViewDto.Line line) {
         String text = switch (problem.code()) {
-            case PRICE_CHANGED -> uiMessages.get("cart.message.price-changed", line.name());
-            case PRODUCT_UNAVAILABLE -> uiMessages.get("cart.message.product-unavailable", line.name());
-            case QUANTITY_EXCEEDS_STOCK ->
+            case "PRICE_CHANGED" -> uiMessages.get("cart.message.price-changed", line.name());
+            case "PRODUCT_UNAVAILABLE" -> uiMessages.get("cart.message.product-unavailable", line.name());
+            case "QUANTITY_EXCEEDS_STOCK" ->
                     uiMessages.get("cart.message.quantity-exceeds-stock", line.name(), line.maxQuantity());
+            default -> throw new IllegalArgumentException("Unknown cart problem " + problem.code());
         };
-        return new MessageResponse(problem.code().name(), problem.productId(), text);
-    }
-
-    private static Long minorOrNull(Money money) {
-        return money == null ? null : money.minor();
-    }
-
-    record CartResponse(List<CartLineResponse> lines, int itemCount, long totalMinor, boolean canPlaceOrder,
-                        List<MessageResponse> messages) {
-    }
-
-    record CartLineResponse(long productId, String name, String imageUrl, long unitPriceMinor, int quantity,
-                            long lineTotalMinor, ProductAvailability status, int maxQuantity, boolean priceChanged,
-                            Long previousPriceMinor, boolean quantityExceedsStock) {
-    }
-
-    record MessageResponse(String code, Long productId, String text) {
+        return new CartViewDto.Message(problem.code(), problem.productId(), text);
     }
 }
