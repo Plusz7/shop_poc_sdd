@@ -28,6 +28,7 @@ class StripeClientConfig {
                 .setConnectTimeout(Math.toIntExact(properties.connectTimeout().toMillis()))
                 .setReadTimeout(Math.toIntExact(properties.readTimeout().toMillis()))
                 .setMaxNetworkRetries(0)
+                .setHttpClient(new JdkStripeHttpClient(properties.connectTimeout(), properties.readTimeout()))
                 .build();
     }
 
