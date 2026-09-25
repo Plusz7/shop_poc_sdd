@@ -1,5 +1,6 @@
 package com.project.custom.support;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -51,6 +52,9 @@ public abstract class IntegrationTest {
     @Autowired
     protected PaymentGatewayProbe paymentGatewayProbe;
 
+    @Autowired
+    private MeterRegistry meterRegistry;
+
     @DynamicPropertySource
     static void stripeApiBase(DynamicPropertyRegistry registry) {
         registry.add("shop.stripe.api-base", STRIPE::baseUrl);
@@ -94,6 +98,22 @@ public abstract class IntegrationTest {
         jdbcTemplate.update("INSERT INTO product_image (product_id, display_order, url, alt) VALUES (?, 0, ?, ?)",
                 id, "/images/test-" + id + ".svg", name);
         return id;
+    }
+
+    /** Metrics of the application context under test (R-34). */
+    protected MetricsAssert metrics() {
+        return new MetricsAssert(meterRegistry);
+    }
+
+    /**
+     * Makes every insert or update of the table fail inside the database until the returned handle is closed,
+     * so that a use case transaction is rolled back after its writes (SC-010).
+     */
+    protected AutoCloseable failingWritesTo(String table) {
+        String trigger = "test_fail_writes_" + table;
+        jdbcTemplate.execute("CREATE TRIGGER " + trigger + " ON " + table
+                + " AFTER INSERT, UPDATE AS THROW 50000, 'Forced failure for a rollback test', 1;");
+        return () -> jdbcTemplate.execute("DROP TRIGGER IF EXISTS " + trigger);
     }
 
     private boolean tableExists(String table) {

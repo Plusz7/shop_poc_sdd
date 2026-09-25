@@ -14,7 +14,17 @@ import java.util.List;
 @Configuration(proxyBeanMethods = false)
 class WebConfig implements WebMvcConfigurer {
 
+    /** Before {@link GuestIdFilter}, so that everything logged for a request carries its correlation id. */
+    static final int CORRELATION_FILTER_ORDER = Ordered.HIGHEST_PRECEDENCE + 10;
     static final int GUEST_ID_FILTER_ORDER = Ordered.HIGHEST_PRECEDENCE + 20;
+
+    @Bean
+    FilterRegistrationBean<CorrelationFilter> correlationFilter() {
+        FilterRegistrationBean<CorrelationFilter> registration = new FilterRegistrationBean<>(new CorrelationFilter());
+        registration.addUrlPatterns("/api/*");
+        registration.setOrder(CORRELATION_FILTER_ORDER);
+        return registration;
+    }
 
     @Bean
     FilterRegistrationBean<GuestIdFilter> guestIdFilter(AppProperties appProperties) {
