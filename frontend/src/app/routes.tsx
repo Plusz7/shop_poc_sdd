@@ -2,6 +2,8 @@ import type { RouteObject } from 'react-router';
 import { CartPage } from '../features/cart/CartPage';
 import { CatalogPage } from '../features/catalog/CatalogPage';
 import { ProductPage } from '../features/catalog/ProductPage';
+import { CheckoutPage } from '../features/checkout/CheckoutPage';
+import { OrderConfirmationPage } from '../features/checkout/OrderConfirmationPage';
 import { Layout } from './Layout';
 import { NotFoundPage } from './NotFoundPage';
 
@@ -17,6 +19,8 @@ export const routes: RouteObject[] = [
       { index: true, element: <CatalogPage /> },
       { path: 'product/:id', element: <ProductPage /> },
       { path: 'cart', element: <CartPage /> },
+      { path: 'checkout', element: <CheckoutPage /> },
+      { path: 'orders/:number', element: <OrderConfirmationPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

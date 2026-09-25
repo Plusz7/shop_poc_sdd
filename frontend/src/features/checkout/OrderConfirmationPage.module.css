@@ -1,0 +1,58 @@
+.order {
+  max-width: 720px;
+}
+
+.number {
+  font-weight: 600;
+}
+
+.lines {
+  margin: 16px 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid #e5e7eb;
+}
+
+.lines li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.quantity {
+  color: #4b5563;
+  font-size: 0.875rem;
+}
+
+.total {
+  display: flex;
+  justify-content: space-between;
+  font-size: 1.125rem;
+}
+
+.spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 8px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  vertical-align: -0.125em;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
