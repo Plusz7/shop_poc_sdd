@@ -99,6 +99,7 @@ jobs:
     name: E2E (Playwright + Stripe test mode)
     runs-on: ubuntu-latest
     needs: [backend, frontend]
+    timeout-minutes: 20
     env:
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
       DB_PASSWORD: E2e-Passw0rd!
@@ -132,7 +133,10 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Start SQL Server
         if: steps.guard.outputs.run == 'true'
-        run: docker compose up -d sqlserver sqlserver-init --wait
+        # --wait treats the one-off sqlserver-init container as failed once it exits, so it runs separately
+        run: |
+          docker compose up -d --wait sqlserver
+          docker compose run --rm sqlserver-init
       - name: Stripe CLI - forward webhooks and capture the signing secret
         if: steps.guard.outputs.run == 'true'
         run: |
@@ -147,13 +151,16 @@ jobs:
         run: |
           ./backend/mvnw -B -q -f backend/pom.xml -DskipTests package
           nohup java -jar backend/target/shop-0.1.0-SNAPSHOT.jar --spring.profiles.active=e2e > backend.log 2>&1 &
-          for i in $(seq 1 60); do curl -sf localhost:8081/actuator/health/readiness && break; sleep 2; done
+          for i in $(seq 1 60); do curl -sf localhost:8081/actuator/health/readiness && exit 0; sleep 2; done
+          echo "::error::Backend did not become ready within 120 s"
+          cat backend.log
+          exit 1
       - name: Run E2E
         if: steps.guard.outputs.run == 'true'
         run: |
           npm --prefix frontend ci
           npx --prefix frontend playwright install --with-deps chromium
-          npm --prefix frontend run e2e
+          npm --prefix frontend run e2e -- --max-failures=5
       - uses: actions/upload-artifact@v4
         if: failure() && steps.guard.outputs.run == 'true'
         with:

@@ -1,0 +1,9 @@
+# E2E profile (CI job "E2E", T157): seed catalog as in `local`, cookie without Secure (plain http://localhost).
+spring:
+  flyway:
+    locations: classpath:db/migration,classpath:db/seed
+
+shop:
+  app:
+    cookie:
+      secure: false
