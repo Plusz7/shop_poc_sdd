@@ -77,6 +77,38 @@ class ProductRepositoryAdapter implements ProductRepository {
                 .toList();
     }
 
+    /**
+     * {@code UPDLOCK} makes a second buyer of the same product wait until the first transaction ends, and then
+     * read the decreased stock. Rows already loaded in this transaction are refreshed, so the stock checked is
+     * always the one just read under the lock.
+     */
+    @Override
+    public List<Product> lockForUpdate(Set<ProductId> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        @SuppressWarnings("unchecked")
+        List<ProductJpaEntity> locked = entityManager.createNativeQuery("""
+                        SELECT * FROM product WITH (UPDLOCK, ROWLOCK)
+                        WHERE id IN (:ids)
+                        ORDER BY id""", ProductJpaEntity.class)
+                .setParameter("ids", ids.stream().map(ProductId::value).toList())
+                .getResultList();
+        locked.forEach(entityManager::refresh);
+        return locked.stream().map(CatalogPersistenceMapper::toDomain).toList();
+    }
+
+    @Override
+    public void saveAll(List<Product> products) {
+        for (Product product : products) {
+            ProductJpaEntity entity = entityManager.find(ProductJpaEntity.class, product.id().value());
+            if (entity == null) {
+                throw new IllegalStateException("Product " + product.id().value() + " does not exist");
+            }
+            entity.setStock(product.stock());
+        }
+    }
+
     private static String fromAndWhere(SearchCriteria criteria, Map<String, Object> parameters) {
         StringBuilder jpql = new StringBuilder("""
                 FROM ProductJpaEntity p
