@@ -9,6 +9,7 @@ import com.project.custom.payment.domain.SessionRequest;
 import com.project.custom.payment.domain.SessionResult;
 import com.project.custom.shared.domain.Money;
 import com.project.custom.shared.infrastructure.config.AppProperties;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -83,7 +84,7 @@ class StripePaymentGatewayContractTest {
         AppProperties appProperties = new AppProperties(URI.create("http://localhost:5173"),
                 new AppProperties.Cookie(false, Duration.ofDays(30)));
         gateway = new StripePaymentGateway(StripeClientConfig.create(properties), duration -> {
-        }, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
+        }, appProperties, Clock.fixed(NOW, ZoneOffset.UTC), new SimpleMeterRegistry());
     }
 
     @Test

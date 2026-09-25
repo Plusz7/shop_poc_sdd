@@ -27,7 +27,7 @@ first minute.
 | Micrometer | Prometheus | Type | Labels (closed set) | Increments when | FR |
 |---|---|---|---|---|---|
 | `shop.cart.additions` | `shop_cart_additions_total` | counter | — | after commit of adding a line to the cart (`POST /api/cart/lines` → 2xx) | FR-027 |
-| `shop.orders.created` | `shop_orders_created_total` | counter | — | after commit of the order-creating TX1 | FR-027 |
+| `shop.orders.placed` | `shop_orders_placed_total` | counter | — | after commit of the order-creating TX1 | FR-027 |
 | `shop.orders.mismatches` | `shop_orders_mismatches_total` | counter | `kind`: `PRICE`, `AVAILABILITY`, `CONTENTS` | `409 SUMMARY_OUTDATED` (one increment per kind detected in the request) | FR-027, FR-016 |
 | `shop.orders.completed` | `shop_orders_completed_total` | counter | `status`: `PAID`, `PAYMENT_FAILED`, `NEEDS_REVIEW` | after commit of a status change to a target state | FR-027 |
 | `shop.orders.paid.value` (base unit `pln`) | `shop_orders_paid_value_pln_total` | counter | — | after commit of `PAID`, by `total.minor / 100` (presentation only — never used for monetary calculations) | FR-027 |
@@ -40,6 +40,8 @@ first minute.
 | `shop.outbox.pending` | `shop_outbox_pending` | gauge | — | number of `outbox_event` rows with `sent_at IS NULL` (15 s cache) | FR-029 |
 | `shop.outbox.oldest` (base unit `seconds`) | `shop_outbox_oldest_seconds` | gauge | — | age of the oldest unsent event; `0` when none | FR-029 |
 | `shop.flyway.migrations` | `shop_flyway_migrations` | gauge | `state`: `success`, `failed`, `pending` | number of migrations in a given state, computed once after startup | FR-030 |
+
+Names must not end with a suffix reserved by OpenMetrics (`_created`, `_total`, `_info`, `_bucket`, `_count`, `_sum`): the Prometheus client strips it from the base name (`shop.orders.created` would be exported as `shop_orders_total`), hence `shop.orders.placed`.
 
 **Forbidden in labels and names** (FR-031, test SC-012): email, full name, address, order number
 (`ORD-…`), Stripe identifiers (`cs_…`, `pi_…`, `evt_…`), `GuestId`, correlation identifier, search
@@ -72,7 +74,7 @@ panel). Each has a `firing` and a `resolved` case in `observability/prometheus/t
 | `ForgedPaymentConfirmation` | `increase(shop_payment_webhook_total{outcome="rejected_signature"}[5m]) > 0` | 0m | critical | confirmation with an invalid signature |
 | `PaymentProviderErrors` | `sum(rate(shop_stripe_calls_seconds_count{outcome!="success"}[5m])) / sum(rate(shop_stripe_calls_seconds_count[5m])) > 0.2` | 5m | critical | errors/timeouts > 20% |
 | `DelayedPaymentConfirmations` | `histogram_quantile(0.95, sum by (le) (rate(shop_payment_confirmation_delay_seconds_bucket[5m]))) > 30` | 5m | critical | "Paid" > 30 s (SC-007, R-29a) |
-| `MissingPaymentConfirmations` | `(sum(increase(shop_orders_created_total[15m])) > 0) and on() (sum(increase(shop_payment_webhook_total{outcome=~"processed\|duplicate"}[15m])) == 0)` | 5m | critical | as above — no webhooks (R-29b) |
+| `MissingPaymentConfirmations` | `(sum(increase(shop_orders_placed_total[15m])) > 0) and on() (sum(increase(shop_payment_webhook_total{outcome=~"processed\|duplicate"}[15m])) == 0)` | 5m | critical | as above — no webhooks (R-29b) |
 | `OrderNeedsReview` | `increase(shop_orders_completed_total{status="NEEDS_REVIEW"}[10m]) > 0` | 0m | warning | a "Needs review" order appears |
 | `OutboxBacklog` | `shop_outbox_oldest_seconds > 300` | 0m | warning, plus `requires="fulfillment"` | oldest event > 5 min (R-30: in this feature it fires after every paid order — no dispatch job) |
 | `ShopDown` | `up{job="shop-backend"} == 0` | 1m | critical | no metrics scrape for 1 min |

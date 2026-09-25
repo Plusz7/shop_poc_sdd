@@ -11,6 +11,7 @@ import com.project.custom.payment.domain.SessionRequest;
 import com.project.custom.payment.domain.SessionResult;
 import com.project.custom.shared.domain.Money;
 import com.project.custom.shared.infrastructure.config.AppProperties;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -76,7 +77,7 @@ class StripePaymentGatewayFailureTest {
         AppProperties appProperties = new AppProperties(URI.create("http://localhost:5173"),
                 new AppProperties.Cookie(false, Duration.ofDays(30)));
         gateway = new StripePaymentGateway(StripeClientConfig.create(properties), sleeps::add, appProperties,
-                Clock.fixed(Instant.parse("2026-09-25T10:00:00Z"), ZoneOffset.UTC));
+                Clock.fixed(Instant.parse("2026-09-25T10:00:00Z"), ZoneOffset.UTC), new SimpleMeterRegistry());
     }
 
     @Test

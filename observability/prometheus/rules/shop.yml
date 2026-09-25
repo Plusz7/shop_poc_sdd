@@ -1,0 +1,97 @@
+# Alert rules of the shop - verbatim from specs/001-shop-browse-cart-checkout/contracts/metrics.md §4 (FR-034).
+# Every rule has a firing and a resolved case in ../tests/shop.test.yml (SC-011).
+groups:
+  - name: shop
+    interval: 15s
+    rules:
+      - alert: HighServerErrorRate
+        expr: sum(rate(http_server_requests_seconds_count{application="shop",status=~"5.."}[5m])) / sum(rate(http_server_requests_seconds_count{application="shop"}[5m])) > 0.05
+        for: 5m
+        labels:
+          application: shop
+          severity: critical
+        annotations:
+          summary: More than 5% of API responses are server errors (5xx).
+          dashboard: http://localhost:3000/d/shop-http/shop-http?viewPanel=2
+
+      - alert: SlowCatalogOrCartResponses
+        expr: histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{application="shop",uri=~"/api/products|/api/cart"}[5m]))) > 1
+        for: 5m
+        labels:
+          application: shop
+          severity: warning
+        annotations:
+          summary: 95th percentile of catalog or cart response time is above 1 s (SC-003).
+          dashboard: http://localhost:3000/d/shop-http/shop-http?viewPanel=3
+
+      - alert: ForgedPaymentConfirmation
+        expr: increase(shop_payment_webhook_total{outcome="rejected_signature"}[5m]) > 0
+        for: 0m
+        labels:
+          application: shop
+          severity: critical
+        annotations:
+          summary: A payment confirmation with an invalid signature was received.
+          dashboard: http://localhost:3000/d/shop-payments-integrations/shop-payments-and-integrations?viewPanel=4
+
+      - alert: PaymentProviderErrors
+        expr: sum(rate(shop_stripe_calls_seconds_count{outcome!="success"}[5m])) / sum(rate(shop_stripe_calls_seconds_count[5m])) > 0.2
+        for: 5m
+        labels:
+          application: shop
+          severity: critical
+        annotations:
+          summary: More than 20% of Stripe calls end with an error or a timeout.
+          dashboard: http://localhost:3000/d/shop-payments-integrations/shop-payments-and-integrations?viewPanel=1
+
+      - alert: DelayedPaymentConfirmations
+        expr: histogram_quantile(0.95, sum by (le) (rate(shop_payment_confirmation_delay_seconds_bucket[5m]))) > 30
+        for: 5m
+        labels:
+          application: shop
+          severity: critical
+        annotations:
+          summary: 95th percentile of payment confirmation delay is above 30 s (SC-007).
+          dashboard: http://localhost:3000/d/shop-payments-integrations/shop-payments-and-integrations?viewPanel=5
+
+      - alert: MissingPaymentConfirmations
+        expr: (sum(increase(shop_orders_placed_total[15m])) > 0) and on() (sum(increase(shop_payment_webhook_total{outcome=~"processed|duplicate"}[15m])) == 0)
+        for: 5m
+        labels:
+          application: shop
+          severity: critical
+        annotations:
+          summary: Orders are placed but no payment confirmations arrive (check stripe-cli and the webhook secret).
+          dashboard: http://localhost:3000/d/shop-payments-integrations/shop-payments-and-integrations?viewPanel=4
+
+      - alert: OrderNeedsReview
+        expr: increase(shop_orders_completed_total{status="NEEDS_REVIEW"}[10m]) > 0
+        for: 0m
+        labels:
+          application: shop
+          severity: warning
+        annotations:
+          summary: An order needs manual review.
+          dashboard: http://localhost:3000/d/shop-purchase-funnel/shop-purchase-funnel?viewPanel=2
+
+      - alert: OutboxBacklog
+        expr: shop_outbox_oldest_seconds > 300
+        for: 0m
+        labels:
+          application: shop
+          severity: warning
+          requires: fulfillment
+        annotations:
+          summary: The oldest unsent outbox event is older than 5 minutes.
+          description: Expected in this feature - no job dispatches outbox events until the fulfillment feature (R-30).
+          dashboard: http://localhost:3000/d/shop-payments-integrations/shop-payments-and-integrations?viewPanel=7
+
+      - alert: ShopDown
+        expr: up{job="shop-backend"} == 0
+        for: 1m
+        labels:
+          application: shop
+          severity: critical
+        annotations:
+          summary: Prometheus cannot scrape the shop backend metrics.
+          dashboard: http://localhost:3000/d/shop-jvm-database/shop-jvm-and-database?viewPanel=8

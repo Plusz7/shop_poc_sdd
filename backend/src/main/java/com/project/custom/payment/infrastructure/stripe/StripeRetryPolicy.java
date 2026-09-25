@@ -25,33 +25,46 @@ class StripeRetryPolicy {
     private static final Logger log = LoggerFactory.getLogger(StripeRetryPolicy.class);
 
     private final Sleeper sleeper;
+    private final StripeCallMetrics metrics;
 
-    StripeRetryPolicy(Sleeper sleeper) {
+    StripeRetryPolicy(Sleeper sleeper, StripeCallMetrics metrics) {
         this.sleeper = sleeper;
+        this.metrics = metrics;
     }
 
     /**
+     * Every attempt is recorded in {@code shop.stripe.calls} and every retry in {@code shop.stripe.retries}.
+     *
      * @throws StripeUnavailableException when all attempts failed with a retryable error
      * @throws StripeException            a non-retryable error of the first attempt that got it
      */
     <T> T execute(StripeOperation operation, StripeCall<T> call) throws StripeException {
         for (int attempt = 1; ; attempt++) {
+            long start = System.nanoTime();
             try {
-                return call.execute();
+                T result = call.execute();
+                metrics.attempt(operation, CallOutcome.SUCCESS, since(start));
+                return result;
             } catch (StripeException exception) {
+                CallOutcome outcome = outcomeOf(exception);
+                metrics.attempt(operation, outcome, since(start));
                 if (!isRetryable(exception)) {
                     throw exception;
                 }
-                CallOutcome outcome = outcomeOf(exception);
                 if (attempt > RETRY_DELAYS.size()) {
                     log.warn("Stripe {} unavailable after {} attempts, last outcome {}", operation, attempt, outcome);
                     throw new StripeUnavailableException(operation, outcome);
                 }
                 log.warn("Stripe {} attempt {} failed with {} ({}), retrying", operation, attempt, outcome,
                         exception.getClass().getSimpleName());
+                metrics.retry(operation);
                 pause(RETRY_DELAYS.get(attempt - 1), operation);
             }
         }
+    }
+
+    private static Duration since(long startNanos) {
+        return Duration.ofNanos(System.nanoTime() - startNanos);
     }
 
     static boolean isRetryable(StripeException exception) {

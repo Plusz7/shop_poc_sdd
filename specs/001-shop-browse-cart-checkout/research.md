@@ -498,7 +498,7 @@ in the plan's Technical Context.
   two rules: (a) **confirmation delay** — the histogram `shop.payment.confirmation.delay`
   = time from `event.created` (Stripe) to the commit of the webhook handling; alert when p95 > 30 s
   for 5 min; (b) **missing confirmations** — orders are created but webhooks do not arrive:
-  `increase(shop_orders_created_total[15m]) > 0 and increase(shop_payment_webhook_total[15m]) == 0`
+  `increase(shop_orders_placed_total[15m]) > 0 and increase(shop_payment_webhook_total[15m]) == 0`
   for 5 min (e.g. a stopped `stripe-cli`, a wrong `whsec_`). The time from order creation to
   payment (FR-028) is a separate histogram `shop.order.time.to.payment` — informational, because
   it includes the time the customer spends entering card details.

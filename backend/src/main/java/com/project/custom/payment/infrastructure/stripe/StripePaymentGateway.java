@@ -13,6 +13,7 @@ import com.stripe.exception.StripeException;
 import com.stripe.model.checkout.Session;
 import com.stripe.net.RequestOptions;
 import com.stripe.param.checkout.SessionCreateParams;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -40,9 +41,10 @@ class StripePaymentGateway implements PaymentGateway {
     private final String baseUrl;
     private final Clock clock;
 
-    StripePaymentGateway(StripeClient stripeClient, Sleeper sleeper, AppProperties appProperties, Clock clock) {
+    StripePaymentGateway(StripeClient stripeClient, Sleeper sleeper, AppProperties appProperties, Clock clock,
+                         MeterRegistry meterRegistry) {
         this.stripeClient = stripeClient;
-        this.retryPolicy = new StripeRetryPolicy(sleeper);
+        this.retryPolicy = new StripeRetryPolicy(sleeper, new StripeCallMetrics(meterRegistry));
         String base = appProperties.baseUrl().toString();
         this.baseUrl = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
         this.clock = clock;

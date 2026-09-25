@@ -1,6 +1,7 @@
 package com.project.custom.cart.application;
 
 import com.project.custom.support.IntegrationTest;
+import com.project.custom.support.MetricsAssert;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -166,6 +167,37 @@ class CartServiceIT extends IntegrationTest {
     void addingRenewsTheGuestCookie() throws Exception {
         add(guest, mug, 1)
                 .andExpect(header().string("Set-Cookie", containsString("shop_guest=" + guest)));
+    }
+
+    @Test
+    void successfulAdditionIsCountedAfterCommit() throws Exception {
+        MetricsAssert.Delta delta = metrics().delta(() -> add(guest, mug, 1).andExpect(status().isOk()));
+
+        assertThat(delta.of("shop.cart.additions")).isEqualTo(1);
+    }
+
+    @Test
+    void refusedAdditionsAreNotCounted() throws Exception {
+        add(guest, lastThree, 3).andExpect(status().isOk());
+
+        MetricsAssert.Delta delta = metrics().delta(() -> {
+            add(guest, lastThree, 1).andExpect(status().isConflict());
+            add(guest, soldOut, 1).andExpect(status().isConflict());
+            add(guest, mug, 0).andExpect(status().isBadRequest());
+        });
+
+        assertThat(delta.of("shop.cart.additions")).isZero();
+    }
+
+    @Test
+    void rolledBackAdditionIsNotCounted() throws Exception {
+        MetricsAssert.Delta delta;
+        try (AutoCloseable failing = failingWritesTo("cart_line")) {
+            delta = metrics().delta(() -> add(guest, mug, 1).andExpect(status().is5xxServerError()));
+        }
+
+        assertThat(delta.of("shop.cart.additions")).isZero();
+        cart(guest).andExpect(jsonPath("$.lines", hasSize(0)));
     }
 
     private ResultActions cart(String guestId) throws Exception {

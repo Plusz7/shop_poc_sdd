@@ -46,6 +46,15 @@ public final class StripeWebhookSigner {
         return new SessionEvent(newEventId(), type, sessionId, amountTotal, "pln", "paid", false);
     }
 
+    /** A declined card within a still open checkout session (R-28). */
+    public static String paymentIntentFailedEvent() {
+        return """
+                {"id":"%s","object":"event","api_version":"2025-01-27.acacia","created":%d,"livemode":false,\
+                "type":"payment_intent.payment_failed","data":{"object":{"id":"pi_test_declined",\
+                "object":"payment_intent","status":"requires_payment_method"}}}"""
+                .formatted(newEventId(), Instant.now().getEpochSecond());
+    }
+
     /** An event of a type the shop does not handle. */
     public static String otherEvent(String type) {
         return """

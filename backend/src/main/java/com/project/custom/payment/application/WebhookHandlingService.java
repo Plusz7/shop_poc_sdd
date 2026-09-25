@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.function.Predicate;
@@ -42,16 +43,18 @@ public class WebhookHandlingService {
     private final ProcessedEventRepository processedEventRepository;
     private final PaymentRepository paymentRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final PaymentMetrics paymentMetrics;
     private final TransactionTemplate transactionTemplate;
     private final Clock clock;
 
     WebhookHandlingService(ProviderEventVerifier eventVerifier, ProcessedEventRepository processedEventRepository,
                            PaymentRepository paymentRepository, ApplicationEventPublisher eventPublisher,
-                           TransactionTemplate transactionTemplate, Clock clock) {
+                           PaymentMetrics paymentMetrics, TransactionTemplate transactionTemplate, Clock clock) {
         this.eventVerifier = eventVerifier;
         this.processedEventRepository = processedEventRepository;
         this.paymentRepository = paymentRepository;
         this.eventPublisher = eventPublisher;
+        this.paymentMetrics = paymentMetrics;
         this.transactionTemplate = transactionTemplate;
         this.clock = clock;
     }
@@ -67,9 +70,11 @@ public class WebhookHandlingService {
         try {
             event = eventVerifier.verify(payload, signatureHeader);
         } catch (InvalidEventSignature invalid) {
+            paymentMetrics.webhook(WebhookOutcome.REJECTED_SIGNATURE);
             throw new WebhookRejectedException(WebhookOutcome.REJECTED_SIGNATURE, invalid.getMessage());
         }
         if (event.livemode()) {
+            paymentMetrics.webhook(WebhookOutcome.REJECTED_LIVEMODE);
             throw new WebhookRejectedException(WebhookOutcome.REJECTED_LIVEMODE, "Live mode events are not accepted");
         }
         MDC.put(EVENT_ID_MDC_KEY, event.eventId());
@@ -82,12 +87,14 @@ public class WebhookHandlingService {
         }
     }
 
+    /** Runs in the webhook transaction; the reported metrics are recorded only after its commit. */
     private WebhookOutcome process(ProviderConfirmation event) {
         Instant now = clock.instant();
         if (!processedEventRepository.register(event.eventId(), event.type(), now)) {
+            paymentMetrics.webhook(WebhookOutcome.DUPLICATE);
             return WebhookOutcome.DUPLICATE;
         }
-        return switch (event.type()) {
+        WebhookOutcome outcome = switch (event.type()) {
             case SESSION_COMPLETED -> event.paid() ? confirm(event, now) : WebhookOutcome.IGNORED;
             case ASYNC_PAYMENT_SUCCEEDED -> confirm(event, now);
             case ASYNC_PAYMENT_FAILED -> end(event, Payment::fail, PaymentFailedEvent.Reason.FAILED);
@@ -95,6 +102,26 @@ public class WebhookHandlingService {
             // The session stays open and the customer can try another card; reported in metrics only (R-28).
             case PAYMENT_INTENT_FAILED -> WebhookOutcome.PROCESSED;
             default -> WebhookOutcome.IGNORED;
+        };
+        paymentMetrics.webhook(outcome);
+        if (outcome == WebhookOutcome.PROCESSED) {
+            paymentOutcome(event.type()).ifPresent(payment -> {
+                paymentMetrics.payment(payment);
+                if (event.providerCreatedAt() != null) {
+                    paymentMetrics.confirmationDelay(Duration.between(event.providerCreatedAt(), now));
+                }
+            });
+        }
+        return outcome;
+    }
+
+    /** Mapping of handled events to payment outcomes (R-28). */
+    private static Optional<PaymentOutcome> paymentOutcome(String type) {
+        return switch (type) {
+            case SESSION_COMPLETED, ASYNC_PAYMENT_SUCCEEDED -> Optional.of(PaymentOutcome.SUCCEEDED);
+            case ASYNC_PAYMENT_FAILED, PAYMENT_INTENT_FAILED -> Optional.of(PaymentOutcome.DECLINED);
+            case SESSION_EXPIRED -> Optional.of(PaymentOutcome.CANCELED);
+            default -> Optional.empty();
         };
     }
 

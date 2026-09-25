@@ -21,6 +21,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
@@ -38,13 +39,16 @@ class PaymentEventsListener {
     private final CatalogCommandFacade catalogCommandFacade;
     private final CartCommandFacade cartCommandFacade;
     private final OutboxEventPublisher outboxEventPublisher;
+    private final OrderMetrics orderMetrics;
 
     PaymentEventsListener(OrderRepository orderRepository, CatalogCommandFacade catalogCommandFacade,
-                          CartCommandFacade cartCommandFacade, OutboxEventPublisher outboxEventPublisher) {
+                          CartCommandFacade cartCommandFacade, OutboxEventPublisher outboxEventPublisher,
+                          OrderMetrics orderMetrics) {
         this.orderRepository = orderRepository;
         this.catalogCommandFacade = catalogCommandFacade;
         this.cartCommandFacade = cartCommandFacade;
         this.outboxEventPublisher = outboxEventPublisher;
+        this.orderMetrics = orderMetrics;
     }
 
     @EventListener
@@ -61,6 +65,8 @@ class PaymentEventsListener {
         if (before == OrderStatus.AWAITING_PAYMENT) {
             cartCommandFacade.clear(order.guestId());
         }
+        orderMetrics.orderCompleted(order.status(), order.total(),
+                Duration.between(order.createdAt(), order.paidAt().orElse(event.confirmedAt())));
         if (outcome == ConfirmationOutcome.PAID) {
             outboxEventPublisher.publish(OrderPaidEvent.TYPE, order.number().value(), paidEvent(order));
             log.info("Order {} paid", order.number());
@@ -78,6 +84,7 @@ class PaymentEventsListener {
         }
         order.markPaymentFailed();
         orderRepository.save(order);
+        orderMetrics.orderCompleted(OrderStatus.PAYMENT_FAILED, order.total(), Duration.ZERO);
         log.info("Payment of order {} ended without success: {}", order.number(), event.reason());
     }
 
