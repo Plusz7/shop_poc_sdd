@@ -2,11 +2,13 @@ package com.project.custom.cart.application;
 
 import com.project.custom.cart.domain.Cart;
 import com.project.custom.cart.domain.CartId;
+import com.project.custom.cart.domain.CartLineNotFoundException;
 import com.project.custom.cart.domain.CartPricing;
 import com.project.custom.cart.domain.CartProduct;
 import com.project.custom.cart.domain.CartRepository;
 import com.project.custom.cart.domain.PricedCart;
 import com.project.custom.cart.domain.ProductAvailability;
+import com.project.custom.cart.domain.QuantityCapped;
 import com.project.custom.catalog.CatalogQueryFacade;
 import com.project.custom.catalog.PricingProductDto;
 import com.project.custom.shared.domain.GuestId;
@@ -20,8 +22,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Cart use cases of the guest (US2): reading the priced cart and adding products. Prices always come from
- * the catalog (FR-010).
+ * Cart use cases of the guest (US2, US3): reading the priced cart, adding products and editing the cart.
+ * Prices always come from the catalog (FR-010); every change returns the freshly priced cart.
  */
 @Service
 public class CartService {
@@ -60,6 +62,55 @@ public class CartService {
         cart.add(product, quantity, clock.instant());
         cartRepository.save(cart);
         return price(cart);
+    }
+
+    /**
+     * Sets the quantity of a line, capped at what is available now; {@code 0} removes the line (US3-2..4).
+     *
+     * @throws CartLineNotFoundException                                  when the cart has no line for the product
+     * @throws com.project.custom.cart.domain.ProductUnavailableException when a positive quantity is set for an
+     *                                                                    unavailable product
+     */
+    @Transactional
+    public QuantityChange changeQuantity(GuestId guestId, long productId, int quantity) {
+        Cart cart = cartRepository.findByGuest(guestId).orElseThrow(() -> new CartLineNotFoundException(productId));
+        CartProduct product = products(Set.of(productId)).get(productId);
+        int maxQuantity = product != null && product.isAvailable() ? product.maxQuantity() : 0;
+        QuantityCapped capped = cart.changeQuantity(productId, quantity, maxQuantity, clock.instant()).orElse(null);
+        cartRepository.save(cart);
+        return new QuantityChange(price(cart), productId, capped);
+    }
+
+    /** Removes a line; removing a line that is not in the cart is not an error (idempotent). */
+    @Transactional
+    public PricedCart remove(GuestId guestId, long productId) {
+        return cartRepository.findByGuest(guestId).map(cart -> {
+            cart.remove(productId, clock.instant());
+            cartRepository.save(cart);
+            return price(cart);
+        }).orElseGet(PricedCart::empty);
+    }
+
+    /** Removes all lines (FR-009). */
+    @Transactional
+    public PricedCart clear(GuestId guestId) {
+        cartRepository.findByGuest(guestId).ifPresent(cart -> {
+            cart.clear(clock.instant());
+            cartRepository.save(cart);
+        });
+        return PricedCart.empty();
+    }
+
+    /** The customer acknowledged the price changes; the current prices stop being reported as changed (R-09). */
+    @Transactional
+    public PricedCart acceptPrices(GuestId guestId) {
+        return cartRepository.findByGuest(guestId).map(cart -> {
+            Map<Long, CartProduct> products = products(cart.productIds());
+            cart.acceptPrices(products.values().stream()
+                    .collect(Collectors.toMap(CartProduct::productId, CartProduct::price)), clock.instant());
+            cartRepository.save(cart);
+            return CartPricing.price(cart, products);
+        }).orElseGet(PricedCart::empty);
     }
 
     private PricedCart price(Cart cart) {
