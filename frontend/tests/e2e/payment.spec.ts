@@ -66,6 +66,12 @@ async function payWithCard(page: Page, cardNumber: string) {
   await page.locator('#cardExpiry').fill('12 / 34');
   await page.locator('#cardCvc').fill('123');
   await page.locator('#billingName').fill('Jan Kowalski');
+  // Stripe preselects the country from the runner's IP (a US runner in CI adds a required ZIP field).
+  await page.locator('#billingCountry').selectOption('PL');
+  const postalCode = page.locator('#billingPostalCode');
+  if (await postalCode.isVisible()) {
+    await postalCode.fill('80-001');
+  }
   await page.locator('[data-testid="hosted-payment-submit-button"]').click();
 }
 
