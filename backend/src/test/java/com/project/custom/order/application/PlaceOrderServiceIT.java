@@ -1,6 +1,7 @@
 package com.project.custom.order.application;
 
 import com.project.custom.support.CheckoutIntegrationTest;
+import com.project.custom.support.MetricsAssert;
 import com.project.custom.support.StripeStub;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -233,6 +234,93 @@ class PlaceOrderServiceIT extends CheckoutIntegrationTest {
                 .andExpect(jsonPath("$.code").value("ORDER_ALREADY_PAID"));
 
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM orders", Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    void placedOrderIsCounted() throws Exception {
+        MetricsAssert.Delta delta = metrics().delta(() -> placeOrder(guest));
+
+        assertThat(delta.of("shop.orders.placed")).isEqualTo(1);
+        assertThat(delta.of("shop.orders.completed", "status", "PAYMENT_FAILED")).isZero();
+    }
+
+    @Test
+    void changedPriceIsCountedAsAPriceMismatch() throws Exception {
+        Map<String, Object> request = orderRequest(cart(guest));
+        jdbcTemplate.update("UPDATE product SET price_minor = 13900 WHERE id = ?", mug);
+
+        MetricsAssert.Delta delta = metrics().delta(() -> placeOrder(guest, request).andExpect(status().isConflict()));
+
+        assertMismatches(delta, 1, 0, 0);
+        assertThat(delta.of("shop.orders.placed")).isZero();
+    }
+
+    @Test
+    void unavailableProductIsCountedAsAnAvailabilityMismatch() throws Exception {
+        Map<String, Object> request = orderRequest(cart(guest));
+        jdbcTemplate.update("UPDATE product SET stock = 0 WHERE id = ?", plate);
+
+        MetricsAssert.Delta delta = metrics().delta(() -> placeOrder(guest, request).andExpect(status().isConflict()));
+
+        assertMismatches(delta, 0, 1, 0);
+        assertThat(delta.of("shop.orders.placed")).isZero();
+    }
+
+    @Test
+    void differentProductsAreCountedAsAContentsMismatch() throws Exception {
+        Map<String, Object> request = new HashMap<>(orderRequest(cart(guest)));
+        request.put("confirmedSummary", Map.of(
+                "lines", List.of(Map.of("productId", mug, "quantity", 2, "unitPriceMinor", 12_900)),
+                "totalMinor", 25_800));
+
+        MetricsAssert.Delta delta = metrics().delta(() -> placeOrder(guest, request).andExpect(status().isConflict()));
+
+        assertMismatches(delta, 0, 0, 1);
+    }
+
+    @Test
+    void severalDifferencesAreCountedOncePerKind() throws Exception {
+        Map<String, Object> request = orderRequest(cart(guest));
+        jdbcTemplate.update("UPDATE product SET price_minor = 13900 WHERE id = ?", mug);
+        addToCart(guest, plate, 1);
+
+        MetricsAssert.Delta delta = metrics().delta(() -> placeOrder(guest, request).andExpect(status().isConflict()));
+
+        assertMismatches(delta, 1, 0, 1);
+    }
+
+    @Test
+    void unavailableStripeCountsTheCreatedOrderAndItsPaymentFailure() throws Exception {
+        STRIPE.createSessionUnavailable();
+
+        MetricsAssert.Delta delta = metrics().delta(() -> placeOrder(guest, orderRequest(cart(guest)))
+                .andExpect(status().isServiceUnavailable()));
+
+        assertThat(delta.of("shop.orders.placed")).isEqualTo(1);
+        assertThat(delta.of("shop.orders.completed", "status", "PAYMENT_FAILED")).isEqualTo(1);
+        assertThat(delta.of("shop.stripe.calls", "operation", "create_session", "outcome", "error")).isEqualTo(3);
+        assertThat(delta.of("shop.stripe.retries", "operation", "create_session")).isEqualTo(2);
+    }
+
+    @Test
+    void refusedOrdersAreNotCounted() throws Exception {
+        jdbcTemplate.update("UPDATE product SET stock = 1 WHERE id = ?", mug);
+        Map<String, Object> invalid = new HashMap<>(orderRequest(cart(guest)));
+        invalid.put("postalCode", "12345");
+
+        MetricsAssert.Delta delta = metrics().delta(() -> {
+            placeOrder(guest, orderRequest(cart(guest))).andExpect(status().isConflict());
+            placeOrder(guest, invalid).andExpect(status().isBadRequest());
+        });
+
+        assertThat(delta.of("shop.orders.placed")).isZero();
+        assertMismatches(delta, 0, 0, 0);
+    }
+
+    private static void assertMismatches(MetricsAssert.Delta delta, int price, int availability, int contents) {
+        assertThat(delta.of("shop.orders.mismatches", "kind", "PRICE")).isEqualTo(price);
+        assertThat(delta.of("shop.orders.mismatches", "kind", "AVAILABILITY")).isEqualTo(availability);
+        assertThat(delta.of("shop.orders.mismatches", "kind", "CONTENTS")).isEqualTo(contents);
     }
 
     private void assertNoOrder() {

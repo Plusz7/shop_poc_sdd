@@ -22,9 +22,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -43,16 +46,18 @@ public class PlaceOrderService {
     private final PaymentFacade paymentFacade;
     private final OrderRepository orderRepository;
     private final OrderNumberGenerator orderNumberGenerator;
+    private final OrderMetrics orderMetrics;
     private final TransactionTemplate transactionTemplate;
     private final Clock clock;
 
     PlaceOrderService(CartQueryFacade cartQueryFacade, PaymentFacade paymentFacade, OrderRepository orderRepository,
-                      OrderNumberGenerator orderNumberGenerator, TransactionTemplate transactionTemplate,
-                      Clock clock) {
+                      OrderNumberGenerator orderNumberGenerator, OrderMetrics orderMetrics,
+                      TransactionTemplate transactionTemplate, Clock clock) {
         this.cartQueryFacade = cartQueryFacade;
         this.paymentFacade = paymentFacade;
         this.orderRepository = orderRepository;
         this.orderNumberGenerator = orderNumberGenerator;
+        this.orderMetrics = orderMetrics;
         this.transactionTemplate = transactionTemplate;
         this.clock = clock;
     }
@@ -75,6 +80,7 @@ public class PlaceOrderService {
             throw new OrderRejectedException(Reason.CART_NOT_ORDERABLE, cart);
         }
         if (!matchesConfirmedSummary(cart, command)) {
+            orderMetrics.summaryMismatch(mismatchKinds(cart, command));
             throw new OrderRejectedException(Reason.SUMMARY_OUTDATED, cart);
         }
         if (!cart.canPlaceOrder()) {
@@ -91,7 +97,10 @@ public class PlaceOrderService {
 
         Order order = Order.place(OrderId.random(), orderNumberGenerator.next(), command.guestId(), customer, address,
                 orderLines(cart), clock.instant());
-        transactionTemplate.executeWithoutResult(status -> orderRepository.save(order));
+        transactionTemplate.executeWithoutResult(status -> {
+            orderRepository.save(order);
+            orderMetrics.orderCreated();
+        });
         log.info("Order {} placed for {} at {}, total {} grosze", order.number(), PiiMasking.email(customer.email()),
                 PiiMasking.address(address.streetAndNumber(), address.postalCode(), address.city()),
                 order.total().minor());
@@ -126,6 +135,35 @@ public class PlaceOrderService {
         });
     }
 
+    /**
+     * What differs between the confirmed summary and the fresh pricing, for metrics only (data-model.md,
+     * Observability). A difference in the total alone is reported as {@code PRICE}.
+     */
+    private static Set<MismatchKind> mismatchKinds(PricedCartDto cart, PlaceOrderCommand command) {
+        Map<Long, PlaceOrderCommand.ConfirmedLine> confirmed = command.confirmedLines().stream()
+                .collect(Collectors.toMap(PlaceOrderCommand.ConfirmedLine::productId, Function.identity(),
+                        (first, duplicate) -> first));
+        Set<MismatchKind> kinds = EnumSet.noneOf(MismatchKind.class);
+        if (cart.lines().size() != confirmed.size()) {
+            kinds.add(MismatchKind.CONTENTS);
+        }
+        for (PricedCartDto.Line line : cart.lines()) {
+            if (!line.isAvailable() || line.quantityExceedsStock()) {
+                kinds.add(MismatchKind.AVAILABILITY);
+            }
+            PlaceOrderCommand.ConfirmedLine seen = confirmed.get(line.productId());
+            if (seen == null || seen.quantity() != line.quantity()) {
+                kinds.add(MismatchKind.CONTENTS);
+            } else if (seen.unitPriceMinor() != line.unitPriceMinor()) {
+                kinds.add(MismatchKind.PRICE);
+            }
+        }
+        if (kinds.isEmpty()) {
+            kinds.add(MismatchKind.PRICE);
+        }
+        return kinds;
+    }
+
     private static List<OrderLine> orderLines(PricedCartDto cart) {
         List<OrderLine> lines = new ArrayList<>();
         for (PricedCartDto.Line line : cart.lines()) {
@@ -150,6 +188,8 @@ public class PlaceOrderService {
                 .ifPresent(order -> {
                     order.markPaymentFailed();
                     orderRepository.save(order);
+                    orderMetrics.orderCompleted(OrderStatus.PAYMENT_FAILED, order.total(),
+                            Duration.between(order.createdAt(), clock.instant()));
                 }));
     }
 }

@@ -1,6 +1,7 @@
 package com.project.custom.payment.application;
 
 import com.project.custom.support.CheckoutIntegrationTest;
+import com.project.custom.support.MetricsAssert;
 import com.project.custom.support.StripeWebhookSigner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -262,6 +263,140 @@ class WebhookHandlingServiceIT extends CheckoutIntegrationTest {
     void otherEventTypesAreAcknowledgedAndIgnored() throws Exception {
         deliver(StripeWebhookSigner.otherEvent("customer.created")).andExpect(status().isOk());
 
+        assertUnpaid();
+    }
+
+    // Metrics per contracts/stripe-webhook.md §2 "Metrics" (R-28, R-29, SC-010)
+
+    @Test
+    void paidSessionIsCountedAsProcessedSucceededAndPaid() throws Exception {
+        MetricsAssert.Delta delta = metrics().delta(() ->
+                deliver(sessionEvent(SESSION_COMPLETED, sessionId, TOTAL).json()).andExpect(status().isOk()));
+
+        assertThat(delta.of("shop.payment.webhook", "outcome", "processed")).isEqualTo(1);
+        assertThat(delta.of("shop.payments", "outcome", "succeeded")).isEqualTo(1);
+        assertThat(delta.of("shop.orders.completed", "status", "PAID")).isEqualTo(1);
+        assertThat(delta.of("shop.orders.paid.value")).isEqualTo(TOTAL / 100.0);
+        assertThat(delta.of("shop.order.time.to.payment")).isEqualTo(1);
+        assertThat(delta.of("shop.payment.confirmation.delay")).isEqualTo(1);
+        assertThat(delta.totalSecondsOf("shop.payment.confirmation.delay")).isBetween(0.0, 30.0);
+    }
+
+    @Test
+    void duplicateIsCountedOnlyAsDuplicate() throws Exception {
+        String payload = sessionEvent(SESSION_COMPLETED, sessionId, TOTAL).json();
+        deliver(payload).andExpect(status().isOk());
+
+        MetricsAssert.Delta delta = metrics().delta(() -> deliver(payload).andExpect(status().isOk()));
+
+        assertThat(delta.of("shop.payment.webhook", "outcome", "duplicate")).isEqualTo(1);
+        assertThat(delta.of("shop.payment.webhook", "outcome", "processed")).isZero();
+        assertThat(delta.of("shop.payments", "outcome", "succeeded")).isZero();
+        assertThat(delta.of("shop.orders.completed", "status", "PAID")).isZero();
+        assertThat(delta.of("shop.orders.paid.value")).isZero();
+    }
+
+    @Test
+    void forgedSignatureIsCountedAsRejected() throws Exception {
+        String payload = sessionEvent(SESSION_COMPLETED, sessionId, TOTAL).json();
+
+        MetricsAssert.Delta delta = metrics().delta(() ->
+                deliver(payload, StripeWebhookSigner.sign(payload, Instant.now(), "whsec_test_forged"))
+                        .andExpect(status().isBadRequest()));
+
+        assertThat(delta.of("shop.payment.webhook", "outcome", "rejected_signature")).isEqualTo(1);
+        assertThat(delta.of("shop.payment.webhook", "outcome", "processed")).isZero();
+    }
+
+    @Test
+    void liveModeEventIsCountedAsRejected() throws Exception {
+        MetricsAssert.Delta delta = metrics().delta(() ->
+                deliver(sessionEvent(SESSION_COMPLETED, sessionId, TOTAL).withLivemode(true).json())
+                        .andExpect(status().isBadRequest()));
+
+        assertThat(delta.of("shop.payment.webhook", "outcome", "rejected_livemode")).isEqualTo(1);
+    }
+
+    @Test
+    void declinedCardIsCountedWithoutChangingPaymentOrOrder() throws Exception {
+        MetricsAssert.Delta delta = metrics().delta(() ->
+                deliver(StripeWebhookSigner.paymentIntentFailedEvent()).andExpect(status().isOk()));
+
+        assertThat(delta.of("shop.payment.webhook", "outcome", "processed")).isEqualTo(1);
+        assertThat(delta.of("shop.payments", "outcome", "declined")).isEqualTo(1);
+        assertThat(delta.of("shop.orders.completed", "status", "PAYMENT_FAILED")).isZero();
+        assertUnpaid();
+    }
+
+    @Test
+    void asyncPaymentFailureIsCountedAsDeclinedAndFailedOrder() throws Exception {
+        MetricsAssert.Delta delta = metrics().delta(() ->
+                deliver(sessionEvent(ASYNC_PAYMENT_FAILED, sessionId, TOTAL).withPaymentStatus("unpaid").json())
+                        .andExpect(status().isOk()));
+
+        assertThat(delta.of("shop.payments", "outcome", "declined")).isEqualTo(1);
+        assertThat(delta.of("shop.orders.completed", "status", "PAYMENT_FAILED")).isEqualTo(1);
+    }
+
+    @Test
+    void expiredSessionIsCountedAsCanceled() throws Exception {
+        MetricsAssert.Delta delta = metrics().delta(() ->
+                deliver(sessionEvent(SESSION_EXPIRED, sessionId, TOTAL).withPaymentStatus("unpaid").json())
+                        .andExpect(status().isOk()));
+
+        assertThat(delta.of("shop.payments", "outcome", "canceled")).isEqualTo(1);
+        assertThat(delta.of("shop.orders.completed", "status", "PAYMENT_FAILED")).isEqualTo(1);
+    }
+
+    @Test
+    void unpaidUnknownAndOtherEventsAreCountedAsIgnored() throws Exception {
+        MetricsAssert.Delta delta = metrics().delta(() -> {
+            deliver(sessionEvent(SESSION_COMPLETED, sessionId, TOTAL).withPaymentStatus("unpaid").json())
+                    .andExpect(status().isOk());
+            deliver(sessionEvent(SESSION_COMPLETED, "cs_test_unknown", TOTAL).json()).andExpect(status().isOk());
+            deliver(StripeWebhookSigner.otherEvent("customer.created")).andExpect(status().isOk());
+        });
+
+        assertThat(delta.of("shop.payment.webhook", "outcome", "ignored")).isEqualTo(3);
+        assertThat(delta.of("shop.payment.webhook", "outcome", "processed")).isZero();
+        assertThat(delta.of("shop.payments", "outcome", "succeeded")).isZero();
+    }
+
+    @Test
+    void insufficientStockIsCountedAsNeedsReview() throws Exception {
+        jdbcTemplate.update("UPDATE product SET stock = 1 WHERE id = ?", mug);
+
+        MetricsAssert.Delta delta = metrics().delta(() ->
+                deliver(sessionEvent(SESSION_COMPLETED, sessionId, TOTAL).json()).andExpect(status().isOk()));
+
+        assertThat(delta.of("shop.orders.completed", "status", "NEEDS_REVIEW")).isEqualTo(1);
+        assertThat(delta.of("shop.orders.completed", "status", "PAID")).isZero();
+        assertThat(delta.of("shop.orders.paid.value")).isZero();
+    }
+
+    @Test
+    void lateConfirmationCountsNeedsReviewAndKeepsTheEarlierFailure() throws Exception {
+        deliver(sessionEvent(SESSION_EXPIRED, sessionId, TOTAL).withPaymentStatus("unpaid").json())
+                .andExpect(status().isOk());
+
+        MetricsAssert.Delta delta = metrics().delta(() ->
+                deliver(sessionEvent(SESSION_COMPLETED, sessionId, TOTAL).json()).andExpect(status().isOk()));
+
+        assertThat(delta.of("shop.orders.completed", "status", "NEEDS_REVIEW")).isEqualTo(1);
+        assertThat(delta.of("shop.orders.completed", "status", "PAYMENT_FAILED")).isZero();
+    }
+
+    @Test
+    void rolledBackWebhookIsNotCounted() throws Exception {
+        MetricsAssert.Delta delta;
+        try (AutoCloseable failing = failingWritesTo("orders")) {
+            delta = metrics().delta(() -> deliver(sessionEvent(SESSION_COMPLETED, sessionId, TOTAL).json())
+                    .andExpect(status().isInternalServerError()));
+        }
+
+        assertThat(delta.of("shop.payment.webhook", "outcome", "processed")).isZero();
+        assertThat(delta.of("shop.payments", "outcome", "succeeded")).isZero();
+        assertThat(delta.of("shop.orders.completed", "status", "PAID")).isZero();
         assertUnpaid();
     }
 
