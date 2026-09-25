@@ -1,14 +1,24 @@
+import { useId } from 'react';
 import { Link } from 'react-router';
 import type { Schemas } from '../../api/client';
 import { t } from '../../i18n/t';
 import { Banner } from '../../shared/Banner';
 import { formatPln } from '../../shared/formatPln';
+import { CartLineItem } from './CartLineItem';
 import styles from './CartPage.module.css';
-import { useCart } from './useCart';
+import { useAcceptPrices, useCart, useClearCart } from './useCart';
 
-/** Cart `/cart`: lines priced by the API and the total (US2; editing comes with US3). */
+/** Problems that keep the customer from placing an order (FR-014). */
+const BLOCKING_CODES = new Set(['PRODUCT_UNAVAILABLE', 'QUANTITY_EXCEEDS_STOCK']);
+
+/**
+ * Cart `/cart` (US3): lines priced by the API, editing, price change notices and the total. The frontend
+ * never calculates prices - the total and `canPlaceOrder` come from the backend.
+ */
 export function CartPage() {
   const { data: cart, isPending, isError, refetch } = useCart();
+  const acceptPrices = useAcceptPrices();
+  const clearCart = useClearCart();
 
   if (isPending) {
     return <p role="status">{t('common.loading')}</p>;
@@ -28,50 +38,87 @@ export function CartPage() {
     );
   }
 
-  return (
-    <section className={styles.cart}>
-      <h1>{t('cart.title')}</h1>
-      {cart.lines.length === 0 ? (
+  if (cart.lines.length === 0) {
+    return (
+      <section className={styles.cart}>
+        <h1>{t('cart.title')}</h1>
         <div className={styles.empty}>
           <p>{t('cart.empty')}</p>
           <Link to="/">{t('cart.backToShop')}</Link>
         </div>
-      ) : (
-        <>
-          <ul className={styles.lines} aria-label={t('cart.lines')}>
-            {cart.lines.map((line) => (
-              <CartLine key={line.productId} line={line} />
-            ))}
-          </ul>
-          <p className={styles.total}>
-            <span>{t('cart.total')}</span>
-            <strong>{formatPln(cart.totalMinor)}</strong>
-          </p>
-        </>
+      </section>
+    );
+  }
+
+  return (
+    <section className={styles.cart}>
+      <h1>{t('cart.title')}</h1>
+      {cart.lines.some((line) => line.priceChanged) && (
+        <Banner
+          kind="warning"
+          action={
+            <button
+              type="button"
+              disabled={acceptPrices.isPending}
+              onClick={() => acceptPrices.mutate()}
+            >
+              {t('cart.acceptPrices')}
+            </button>
+          }
+        >
+          {t('cart.priceChanged')}
+        </Banner>
       )}
+      <ul className={styles.lines} aria-label={t('cart.lines')}>
+        {cart.lines.map((line) => (
+          <CartLineItem key={line.productId} line={line} />
+        ))}
+      </ul>
+      <div className={styles.summary}>
+        <button
+          type="button"
+          className={styles.clear}
+          disabled={clearCart.isPending}
+          onClick={() => clearCart.mutate()}
+        >
+          {t('cart.clear')}
+        </button>
+        <p className={styles.total}>
+          <span>{t('cart.total')}</span>
+          <strong>{formatPln(cart.totalMinor)}</strong>
+        </p>
+      </div>
+      <Checkout cart={cart} />
     </section>
   );
 }
 
-function CartLine({ line }: { line: Schemas['CartLine'] }) {
-  return (
-    <li className={styles.line}>
-      <img
-        src={line.imageUrl}
-        alt=""
-        width={80}
-        height={80}
-        loading="lazy"
-        className={styles.image}
-      />
-      <div className={styles.details}>
-        <Link to={`/product/${line.productId}`} className={styles.name}>
-          {line.name}
+function Checkout({ cart }: { cart: Schemas['Cart'] }) {
+  const hintId = useId();
+  if (cart.canPlaceOrder) {
+    return (
+      <div className={styles.checkout}>
+        <Link to="/checkout" className={styles.checkoutButton}>
+          {t('cart.checkout')}
         </Link>
-        <span>{t('cart.unitPrice', { price: formatPln(line.unitPriceMinor) })}</span>
-        <span>{t('cart.lineQuantity', { quantity: line.quantity })}</span>
       </div>
-      <strong className={styles.lineTotal}>{formatPln(line.lineTotalMinor)}</strong>
-    </li>
+    );
+  }
+  const blocking = cart.messages.filter((message) => BLOCKING_CODES.has(message.code));
+  return (
+    <div className={styles.checkout}>
+      <button type="button" className={styles.checkoutButton} disabled aria-describedby={hintId}>
+        {t('cart.checkout')}
+      </button>
+      <div id={hintId} className={styles.hint}>
+        {blocking.length > 0 ? (
+          blocking.map((message) => (
+            <p key={`${message.code}-${message.productId}`}>{message.text}</p>
+          ))
+        ) : (
+          <p>{t('cart.checkoutBlocked')}</p>
+        )}
+      </div>
+    </div>
   );
 }

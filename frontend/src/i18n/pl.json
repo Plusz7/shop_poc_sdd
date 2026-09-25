@@ -58,5 +58,17 @@
   "cart.lines": "Produkty w koszyku",
   "cart.total": "Razem",
   "cart.unitPrice": "Cena: {price}",
-  "cart.lineQuantity": "Liczba sztuk: {quantity}"
+  "cart.quantityFor": "Liczba sztuk: {name}",
+  "cart.quantityInvalid": "Podaj liczbę sztuk od 0 do 99.",
+  "cart.availableQuantity": "Dostępnych: {max} szt.",
+  "cart.previousPrice": "Poprzednia cena:",
+  "cart.removeNamed": "Usuń: {name}",
+  "cart.remove": "Usuń",
+  "cart.clear": "Wyczyść koszyk",
+  "cart.priceChanged": "Ceny niektórych produktów zmieniły się od dodania ich do koszyka.",
+  "cart.acceptPrices": "Rozumiem",
+  "cart.checkout": "Przejdź do kasy",
+  "cart.checkoutBlocked": "Usuń niedostępne produkty lub zmniejsz liczbę sztuk, aby przejść do kasy.",
+  "cart.concurrencyConflict": "Koszyk został zmieniony w innym oknie. Sprawdź go i spróbuj ponownie.",
+  "cart.lineNotFound": "Tego produktu nie ma już w koszyku."
 }
