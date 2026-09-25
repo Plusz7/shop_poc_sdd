@@ -42,7 +42,9 @@ test('2.2 adding the same product from the list merges it into one line', async 
   const lines = page.getByRole('list', { name: 'Produkty w koszyku' }).getByRole('listitem');
   await expect(lines).toHaveCount(1);
   await expect(lines.first()).toContainText('Kubek ceramiczny Łódź');
-  await expect(lines.first()).toContainText('Liczba sztuk: 3');
+  await expect(
+    lines.first().getByRole('textbox', { name: 'Liczba sztuk: Kubek ceramiczny Łódź' }),
+  ).toHaveValue('3');
 });
 
 test('2.3 adding beyond the stock is blocked with the remaining quantity', async ({ page }) => {
