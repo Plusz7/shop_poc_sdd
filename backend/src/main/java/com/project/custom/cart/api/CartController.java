@@ -1,6 +1,6 @@
 package com.project.custom.cart.api;
 
-import com.project.custom.cart.api.CartApiMapper.CartResponse;
+import com.project.custom.cart.CartViewDto;
 import com.project.custom.cart.application.CartProductNotFoundException;
 import com.project.custom.cart.application.CartService;
 import com.project.custom.cart.domain.CartLineNotFoundException;
@@ -36,18 +36,18 @@ class CartController {
     }
 
     @GetMapping
-    CartResponse getCart(GuestId guestId) {
+    CartViewDto getCart(GuestId guestId) {
         return mapper.toResponse(cartService.price(guestId));
     }
 
     @DeleteMapping
-    CartResponse clearCart(GuestId guestId) {
+    CartViewDto clearCart(GuestId guestId) {
         return mapper.toResponse(cartService.clear(guestId));
     }
 
     /** Any price in the request body is ignored — only the catalog price counts (FR-010). */
     @PostMapping("/lines")
-    CartResponse addLine(GuestId guestId, @Valid @RequestBody AddLineRequest request) {
+    CartViewDto addLine(GuestId guestId, @Valid @RequestBody AddLineRequest request) {
         if (request.productId() <= 0) {
             throw ApiException.notFound();
         }
@@ -66,7 +66,7 @@ class CartController {
 
     /** A quantity above what is available is capped with a {@code QUANTITY_CAPPED} message; 0 removes the line. */
     @PutMapping("/lines/{productId}")
-    CartResponse changeQuantity(GuestId guestId, @PathVariable long productId,
+    CartViewDto changeQuantity(GuestId guestId, @PathVariable long productId,
                                 @Valid @RequestBody ChangeQuantityRequest request) {
         try {
             return mapper.toResponse(cartService.changeQuantity(guestId, productId, request.quantity()));
@@ -78,12 +78,12 @@ class CartController {
     }
 
     @DeleteMapping("/lines/{productId}")
-    CartResponse removeLine(GuestId guestId, @PathVariable long productId) {
+    CartViewDto removeLine(GuestId guestId, @PathVariable long productId) {
         return mapper.toResponse(cartService.remove(guestId, productId));
     }
 
     @PostMapping("/accept-prices")
-    CartResponse acceptPrices(GuestId guestId) {
+    CartViewDto acceptPrices(GuestId guestId) {
         return mapper.toResponse(cartService.acceptPrices(guestId));
     }
 

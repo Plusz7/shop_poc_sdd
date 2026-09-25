@@ -84,6 +84,17 @@ function serveCart(cart: Cart) {
 }
 
 describe('cart page', () => {
+  it('shows that the payment was not completed after returning from Stripe', async () => {
+    serveCart(cartOf([mug]));
+
+    renderWithProviders('/cart?payment=canceled');
+
+    expect(
+      await screen.findByText('Płatność nie została dokończona. Twój koszyk czeka.'),
+    ).toBeInTheDocument();
+    expect(await findCartLines()).toHaveLength(1);
+  });
+
   it('shows the empty state with a link to the shop and no checkout button', async () => {
     serveCart(emptyCart);
 

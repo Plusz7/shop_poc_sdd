@@ -1,12 +1,13 @@
-import { useId } from 'react';
-import { Link } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useId } from 'react';
+import { Link, useSearchParams } from 'react-router';
 import type { Schemas } from '../../api/client';
 import { t } from '../../i18n/t';
 import { Banner } from '../../shared/Banner';
 import { formatPln } from '../../shared/formatPln';
 import { CartLineItem } from './CartLineItem';
 import styles from './CartPage.module.css';
-import { useAcceptPrices, useCart, useClearCart } from './useCart';
+import { cartQueryKey, useAcceptPrices, useCart, useClearCart } from './useCart';
 
 /** Problems that keep the customer from placing an order (FR-014). */
 const BLOCKING_CODES = new Set(['PRODUCT_UNAVAILABLE', 'QUANTITY_EXCEEDS_STOCK']);
@@ -19,6 +20,15 @@ export function CartPage() {
   const { data: cart, isPending, isError, refetch } = useCart();
   const acceptPrices = useAcceptPrices();
   const clearCart = useClearCart();
+  const paymentCanceled = useSearchParams()[0].get('payment') === 'canceled';
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (paymentCanceled) {
+      // back from the payment page: the cart may have been cleared meanwhile by a paid order in another tab
+      void queryClient.invalidateQueries({ queryKey: cartQueryKey });
+    }
+  }, [paymentCanceled, queryClient]);
 
   if (isPending) {
     return <p role="status">{t('common.loading')}</p>;
@@ -42,6 +52,7 @@ export function CartPage() {
     return (
       <section className={styles.cart}>
         <h1>{t('cart.title')}</h1>
+        {paymentCanceled && <Banner kind="warning">{t('cart.paymentCanceled')}</Banner>}
         <div className={styles.empty}>
           <p>{t('cart.empty')}</p>
           <Link to="/">{t('cart.backToShop')}</Link>
@@ -53,6 +64,7 @@ export function CartPage() {
   return (
     <section className={styles.cart}>
       <h1>{t('cart.title')}</h1>
+      {paymentCanceled && <Banner kind="warning">{t('cart.paymentCanceled')}</Banner>}
       {cart.lines.some((line) => line.priceChanged) && (
         <Banner
           kind="warning"

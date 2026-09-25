@@ -10,6 +10,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.mssqlserver.MSSQLServerContainer;
 
 import java.util.List;
@@ -36,12 +38,29 @@ public abstract class IntegrationTest {
     private static final MSSQLServerContainer SQL_SERVER =
             new MSSQLServerContainer("mcr.microsoft.com/mssql/server:2022-latest").acceptLicense();
 
+    /** The Stripe API seen by the application; reset to "everything succeeds" before every test. */
+    protected static final StripeStub STRIPE = new StripeStub();
+
     static {
         SQL_SERVER.start();
     }
 
     @Autowired
     protected JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    protected PaymentGatewayProbe paymentGatewayProbe;
+
+    @DynamicPropertySource
+    static void stripeApiBase(DynamicPropertyRegistry registry) {
+        registry.add("shop.stripe.api-base", STRIPE::baseUrl);
+    }
+
+    @BeforeEach
+    void resetStripe() {
+        STRIPE.reset();
+        paymentGatewayProbe.reset();
+    }
 
     @BeforeEach
     void cleanDatabase() {
@@ -90,6 +109,11 @@ public abstract class IntegrationTest {
         @ServiceConnection
         MSSQLServerContainer sqlServer() {
             return SQL_SERVER;
+        }
+
+        @Bean
+        static PaymentGatewayProbe paymentGatewayProbe() {
+            return new PaymentGatewayProbe();
         }
     }
 }
