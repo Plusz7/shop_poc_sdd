@@ -8,7 +8,7 @@ shop:
     secret-key: sk_test_dummy
     # Test-only signing secret used by StripeWebhookSigner; not a secret of any Stripe account.
     webhook-secret: whsec_test_c2hvcC1pbnRlZ3JhdGlvbi10ZXN0cw
-    # Tests pointing the adapter at stripe-mock/WireMock override this with @DynamicPropertySource.
+    # IntegrationTest points the adapter at its WireMock Stripe stub with @DynamicPropertySource.
     api-base: http://localhost:12111
   app:
     base-url: http://localhost:5173
