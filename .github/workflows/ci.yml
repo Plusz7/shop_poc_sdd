@@ -132,7 +132,10 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Start SQL Server
         if: steps.guard.outputs.run == 'true'
-        run: docker compose up -d sqlserver sqlserver-init --wait
+        # --wait treats the one-off sqlserver-init container as failed once it exits, so it runs separately
+        run: |
+          docker compose up -d --wait sqlserver
+          docker compose run --rm sqlserver-init
       - name: Stripe CLI - forward webhooks and capture the signing secret
         if: steps.guard.outputs.run == 'true'
         run: |
