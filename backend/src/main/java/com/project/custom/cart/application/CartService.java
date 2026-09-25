@@ -30,11 +30,14 @@ public class CartService {
 
     private final CartRepository cartRepository;
     private final CatalogQueryFacade catalogQueryFacade;
+    private final CartMetrics cartMetrics;
     private final Clock clock;
 
-    CartService(CartRepository cartRepository, CatalogQueryFacade catalogQueryFacade, Clock clock) {
+    CartService(CartRepository cartRepository, CatalogQueryFacade catalogQueryFacade, CartMetrics cartMetrics,
+                Clock clock) {
         this.cartRepository = cartRepository;
         this.catalogQueryFacade = catalogQueryFacade;
+        this.cartMetrics = cartMetrics;
         this.clock = clock;
     }
 
@@ -61,6 +64,7 @@ public class CartService {
                 .orElseGet(() -> Cart.create(CartId.random(), guestId, clock.instant()));
         cart.add(product, quantity, clock.instant());
         cartRepository.save(cart);
+        cartMetrics.addedToCart();
         return price(cart);
     }
 
