@@ -1,10 +1,12 @@
 package com.project.custom.cart.domain;
 
 import com.project.custom.shared.domain.GuestId;
+import com.project.custom.shared.domain.Money;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -62,6 +64,60 @@ public class Cart {
         existing.ifPresentOrElse(
                 line -> lines.set(lines.indexOf(line), line.withQuantity(current + quantity)),
                 () -> lines.add(new CartLine(product.productId(), quantity, product.price(), now)));
+        updatedAt = now;
+    }
+
+    /**
+     * Sets the quantity of the product's line; {@code 0} removes the line (US3-4). A quantity above
+     * {@code maxQuantity} is capped at it (US3-3, FR-008).
+     *
+     * @param maxQuantity how many items the line may hold now ({@code min(stock, 99)}, 0 when unavailable)
+     * @return the cap applied, when the requested quantity was larger than allowed
+     * @throws CartLineNotFoundException  when the cart has no line for the product
+     * @throws ProductUnavailableException when a positive quantity is set for an unavailable product
+     */
+    public Optional<QuantityCapped> changeQuantity(long productId, int quantity, int maxQuantity, Instant now) {
+        if (quantity < 0 || quantity > CartLine.MAX_QUANTITY) {
+            throw new IllegalArgumentException("Quantity must be between 0 and 99");
+        }
+        CartLine line = line(productId).orElseThrow(() -> new CartLineNotFoundException(productId));
+        if (quantity == 0) {
+            remove(productId, now);
+            return Optional.empty();
+        }
+        int limit = Math.min(maxQuantity, CartLine.MAX_QUANTITY);
+        if (limit < CartLine.MIN_QUANTITY) {
+            throw new ProductUnavailableException(productId);
+        }
+        int newQuantity = Math.min(quantity, limit);
+        lines.set(lines.indexOf(line), line.withQuantity(newQuantity));
+        updatedAt = now;
+        return newQuantity < quantity ? Optional.of(new QuantityCapped(limit)) : Optional.empty();
+    }
+
+    /** Removes the product's line; removing a line that is not in the cart changes nothing. */
+    public void remove(long productId, Instant now) {
+        if (lines.removeIf(line -> line.productId() == productId)) {
+            updatedAt = now;
+        }
+    }
+
+    /** Removes all lines (FR-009, FR-021). */
+    public void clear(Instant now) {
+        lines.clear();
+        updatedAt = now;
+    }
+
+    /**
+     * The customer acknowledged the current prices: they become the reference for price change notices (R-09).
+     *
+     * @param currentPrices current catalog prices by product id; lines of other products are unchanged
+     */
+    public void acceptPrices(Map<Long, Money> currentPrices, Instant now) {
+        lines.replaceAll(line -> {
+            Money current = currentPrices.get(line.productId());
+            return current == null ? line : line.withPriceWhenAdded(current);
+        });
         updatedAt = now;
     }
 

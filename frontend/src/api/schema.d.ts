@@ -593,7 +593,27 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationError"];
-            404: components["responses"]["NotFound"];
+            /** @description The cart has no line for the product */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /**
+             * @description `PRODUCT_UNAVAILABLE` — a quantity > 0 was set for a product that is unavailable now
+             *     (US3-7: such a line can only be removed). Cart unchanged.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     removeLine: {

@@ -26,4 +26,8 @@ public record CartLine(long productId, int quantity, Money priceWhenAdded, Insta
     CartLine withQuantity(int newQuantity) {
         return new CartLine(productId, newQuantity, priceWhenAdded, addedAt);
     }
+
+    CartLine withPriceWhenAdded(Money newPriceWhenAdded) {
+        return new CartLine(productId, quantity, newPriceWhenAdded, addedAt);
+    }
 }

@@ -184,7 +184,17 @@ paths:
         '400':
           $ref: '#/components/responses/ValidationError'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: The cart has no line for the product
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '409':
+          description: |
+            `PRODUCT_UNAVAILABLE` — a quantity > 0 was set for a product that is unavailable now
+            (US3-7: such a line can only be removed). Cart unchanged.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
     delete:
       tags: [cart]
       operationId: removeLine

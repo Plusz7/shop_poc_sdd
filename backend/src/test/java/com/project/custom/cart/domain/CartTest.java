@@ -7,6 +7,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Instant;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -120,6 +122,118 @@ class CartTest {
     void cartLineQuantityIsBetween1And99(int quantity) {
         assertThatThrownBy(() -> new CartLine(7, quantity, Money.pln(1_000), CREATED))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void changingQuantitySetsTheNewQuantityAndMovesUpdatedAt() {
+        cart.add(product(7, 1_000, ProductAvailability.AVAILABLE, 10), 1, CREATED);
+
+        Optional<QuantityCapped> capped = cart.changeQuantity(7, 3, 10, LATER);
+
+        assertThat(capped).isEmpty();
+        assertThat(cart.line(7)).get().extracting(CartLine::quantity).isEqualTo(3);
+        assertThat(cart.updatedAt()).isEqualTo(LATER);
+    }
+
+    @Test
+    void changingQuantityToZeroRemovesTheLine() {
+        cart.add(product(7, 1_000, ProductAvailability.AVAILABLE, 10), 2, CREATED);
+
+        Optional<QuantityCapped> capped = cart.changeQuantity(7, 0, 10, LATER);
+
+        assertThat(capped).isEmpty();
+        assertThat(cart.lines()).isEmpty();
+        assertThat(cart.updatedAt()).isEqualTo(LATER);
+    }
+
+    @Test
+    void quantityAboveTheLimitIsCappedAtTheLimit() {
+        cart.add(product(7, 1_000, ProductAvailability.LOW_STOCK, 5), 1, CREATED);
+
+        Optional<QuantityCapped> capped = cart.changeQuantity(7, 50, 5, LATER);
+
+        assertThat(capped).contains(new QuantityCapped(5));
+        assertThat(cart.line(7)).get().extracting(CartLine::quantity).isEqualTo(5);
+    }
+
+    @Test
+    void quantityUpTo99IsAllowedWhenTheStockIsLarger() {
+        cart.add(product(7, 1_000, ProductAvailability.AVAILABLE, 99), 1, CREATED);
+
+        assertThat(cart.changeQuantity(7, 99, 500, LATER)).isEmpty();
+        assertThat(cart.line(7)).get().extracting(CartLine::quantity).isEqualTo(99);
+    }
+
+    @Test
+    void changingTheQuantityOfAnUnavailableProductIsRejectedButZeroStillRemovesIt() {
+        cart.add(product(7, 1_000, ProductAvailability.AVAILABLE, 10), 2, CREATED);
+
+        assertThatThrownBy(() -> cart.changeQuantity(7, 1, 0, LATER)).isInstanceOf(ProductUnavailableException.class);
+        assertThat(cart.line(7)).get().extracting(CartLine::quantity).isEqualTo(2);
+
+        cart.changeQuantity(7, 0, 0, LATER);
+        assertThat(cart.lines()).isEmpty();
+    }
+
+    @Test
+    void changingTheQuantityOfAMissingLineFails() {
+        assertThatThrownBy(() -> cart.changeQuantity(7, 1, 10, LATER)).isInstanceOf(CartLineNotFoundException.class);
+        assertThat(cart.updatedAt()).isEqualTo(CREATED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {-1, 100})
+    void newQuantityMustBeBetween0And99(int quantity) {
+        cart.add(product(7, 1_000, ProductAvailability.AVAILABLE, 10), 2, CREATED);
+
+        assertThatThrownBy(() -> cart.changeQuantity(7, quantity, 10, LATER))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(cart.line(7)).get().extracting(CartLine::quantity).isEqualTo(2);
+    }
+
+    @Test
+    void removingDeletesTheLine() {
+        cart.add(product(7, 1_000, ProductAvailability.AVAILABLE, 10), 1, CREATED);
+        cart.add(product(8, 1_000, ProductAvailability.AVAILABLE, 10), 1, CREATED);
+
+        cart.remove(7, LATER);
+
+        assertThat(cart.lines()).extracting(CartLine::productId).containsExactly(8L);
+        assertThat(cart.updatedAt()).isEqualTo(LATER);
+    }
+
+    @Test
+    void removingAMissingLineIsANoOp() {
+        cart.add(product(7, 1_000, ProductAvailability.AVAILABLE, 10), 1, CREATED);
+
+        cart.remove(8, LATER);
+
+        assertThat(cart.lines()).hasSize(1);
+        assertThat(cart.updatedAt()).isEqualTo(CREATED);
+    }
+
+    @Test
+    void clearingRemovesAllLines() {
+        cart.add(product(7, 1_000, ProductAvailability.AVAILABLE, 10), 1, CREATED);
+        cart.add(product(8, 1_000, ProductAvailability.AVAILABLE, 10), 1, CREATED);
+
+        cart.clear(LATER);
+
+        assertThat(cart.lines()).isEmpty();
+        assertThat(cart.updatedAt()).isEqualTo(LATER);
+    }
+
+    @Test
+    void acceptingPricesOverwritesThePriceWhenAddedOfTheGivenProducts() {
+        cart.add(product(7, 1_000, ProductAvailability.AVAILABLE, 10), 1, CREATED);
+        cart.add(product(8, 2_000, ProductAvailability.AVAILABLE, 10), 1, CREATED);
+
+        cart.acceptPrices(Map.of(7L, Money.pln(1_200)), LATER);
+
+        assertThat(cart.line(7)).get().extracting(CartLine::priceWhenAdded).isEqualTo(Money.pln(1_200));
+        assertThat(cart.line(8)).get().extracting(CartLine::priceWhenAdded).isEqualTo(Money.pln(2_000));
+        assertThat(cart.line(7)).get().extracting(CartLine::addedAt).isEqualTo(CREATED);
+        assertThat(cart.updatedAt()).isEqualTo(LATER);
     }
 
     private static CartProduct product(long id, long priceMinor, ProductAvailability availability, int maxQuantity) {
