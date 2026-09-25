@@ -32,10 +32,12 @@ class OutboxMetrics {
         this.clock = clock;
         Gauge.builder(PENDING, this, OutboxMetrics::pending)
                 .description("Outbox events not sent yet")
+                .strongReference(true)
                 .register(registry);
         Gauge.builder(OLDEST, this, OutboxMetrics::oldestAgeSeconds)
                 .description("Age of the oldest unsent outbox event; 0 when none")
                 .baseUnit("seconds")
+                .strongReference(true)
                 .register(registry);
     }
 

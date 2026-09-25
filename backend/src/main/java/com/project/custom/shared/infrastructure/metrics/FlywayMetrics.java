@@ -36,6 +36,7 @@ class FlywayMetrics {
             Gauge.builder(MIGRATIONS, count, AtomicLong::get)
                     .description("Database migrations by state")
                     .tag("state", state.name().toLowerCase(Locale.ROOT))
+                    .strongReference(true)
                     .register(registry);
         }
     }
