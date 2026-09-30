@@ -9,6 +9,7 @@ import com.project.custom.order.application.PlaceOrderService;
 import com.project.custom.order.application.PlacedOrder;
 import com.project.custom.shared.api.ApiException;
 import com.project.custom.shared.domain.GuestId;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,6 +37,7 @@ class OrderController {
 
     /** The amount is always priced on the server; the confirmed summary is only compared (R-14). */
     @PostMapping
+    @ApiResponse(responseCode = "201", description = "Order placed and payment started")
     ResponseEntity<StartedPaymentResponse> placeOrder(GuestId guestId, @Valid @RequestBody PlaceOrderRequest request) {
         try {
             PlacedOrder placed = placeOrderService.place(mapper.toCommand(guestId, request));
