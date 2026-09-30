@@ -35,7 +35,7 @@
 .field input {
   min-height: 44px;
   padding: 8px 12px;
-  border: 1px solid #9ca3af;
+  border: 1px solid #6b7280;
   border-radius: 6px;
   font: inherit;
 }
@@ -76,7 +76,7 @@
 }
 
 .submit:disabled {
-  background: #9ca3af;
+  background: #6b7280;
   cursor: not-allowed;
 }
 

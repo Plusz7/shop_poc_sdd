@@ -62,7 +62,7 @@
   width: 110px;
   min-height: 40px;
   padding: 6px 8px;
-  border: 1px solid #d1d5db;
+  border: 1px solid #6b7280;
   border-radius: 6px;
 }
 
@@ -80,7 +80,7 @@
 .sort select {
   min-height: 40px;
   padding: 6px 8px;
-  border: 1px solid #d1d5db;
+  border: 1px solid #6b7280;
   border-radius: 6px;
   background: #fff;
 }
