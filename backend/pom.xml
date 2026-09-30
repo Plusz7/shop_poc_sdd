@@ -27,6 +27,10 @@
         <!-- Boot 4.0.8 manages 11.0.24, affected by GHSA-9xv2-5v5q-p794, GHSA-gcx9-497g-6cp6 and
              GHSA-h3x4-894j-xpx5 (fixed in 11.0.25); drop once the Boot BOM catches up -->
         <tomcat.version>11.0.26</tomcat.version>
+        <!-- Boot 4.0.8 manages 2.21.5 / 3.1.5, affected by GHSA-q4xh-88c3-wmh7 (fixed in 2.21.6 / 3.1.6);
+             drop once the Boot BOM catches up -->
+        <jackson-2-bom.version>2.21.6</jackson-2-bom.version>
+        <jackson-bom.version>3.1.6</jackson-bom.version>
     </properties>
 
     <dependencies>
